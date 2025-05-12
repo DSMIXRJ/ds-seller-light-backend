@@ -1,25 +1,18 @@
-const express = require('express');
-const cors = require('cors');
-const meliAuthRoutes = require('./routes/meliAuthRoutes');
-const authRoutes = require('./routes/authRoutes');
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const loginRoute = require("./routes/login");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // Utilizar a porta do ambiente ou 10000 como fallback
 
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-app.use('/auth', authRoutes);
-app.use('/', meliAuthRoutes);
+// Rota de login
+app.use("/api", loginRoute);
 
-app.get('/api/teste', (req, res) => {
-  res.json({ status: 'ok', mensagem: 'Rota /api/teste funcionando com sucesso!' });
-});
-
-app.get('/', (req, res) => {
-  res.send('<h2>✅ Backend do DS SELLER LIGHT está funcionando!</h2>');
-});
-
+// Servidor online
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });

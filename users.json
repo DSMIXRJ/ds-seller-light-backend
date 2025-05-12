@@ -1,6 +1,10 @@
 [
   {
-    "email": "admin@email.com",
+    "email": "admin@dsseller.com.br",
     "password": "123456"
+  },
+  {
+    "email": "andre@dsseller.com.br",
+    "password": "dsadmin"
   }
 ]
