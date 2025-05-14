@@ -1,11 +1,11 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const path = require("path");
+require("dotenv").config(); // To load .env file for local development if present
 
 const loginRoutes = require("./routes/login");
 const mercadoLivreRoutes = require("./routes/mercadolivre");
-const db = require("./database"); // This will initialize the database connection and create tables if they don't exist
+const pool = require("./database"); // This will initialize the Supabase PostgreSQL pool and create tables
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -20,16 +20,13 @@ app.use("/api/mercadolivre", mercadoLivreRoutes);
 
 // Simple route for root path
 app.get("/", (req, res) => {
-  res.send("DS Seller Backend with SQLite is running!");
+  res.send("DS Seller Backend with Supabase PostgreSQL is running!");
 });
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
-  // Log the path where the database is expected to be, especially if on Render
-  if (process.env.RENDER_DISK_PATH) {
-    console.log(`Database is expected at: ${path.join(process.env.RENDER_DISK_PATH, 'dsseller.sqlite')}`);
-  } else {
-    console.log(`Database is expected at: ${path.join(__dirname, 'dsseller.sqlite')}`);
-  }
+  console.log("Attempting to connect to Supabase PostgreSQL...");
+  // The database.js already attempts to connect and initialize.
+  // We can add a check here if needed, but the pool creation itself is a good indicator.
 });
 

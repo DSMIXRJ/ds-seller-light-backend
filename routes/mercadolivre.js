@@ -1,38 +1,41 @@
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
-const db = require("../database.js"); // Path to database.js
+const pool = require("../database.js"); // Path to database.js (Supabase PostgreSQL pool)
 
-const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996"; // Use environment variable or default
-const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "JBNXIsH4YqA1DqVqjV3n7tU8xWyVvJEO"; // Use environment variable or default
-const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback"; // Use environment variable or default
+const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
+const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "JBNXIsH4YqA1DqVqjV3n7tU8xWyVvJEO";
+const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
 // Helper function to get tokens from DB
-const getTokensFromDB = (userId, marketplace) => {
-  return new Promise((resolve, reject) => {
-    db.get("SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = ? AND marketplace = ?", [userId, marketplace], (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row);
-      }
-    });
-  });
+const getTokensFromDB = async (userId, marketplace) => {
+  const client = await pool.connect();
+  try {
+    const res = await client.query("SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2", [userId, marketplace]);
+    return res.rows[0];
+  } finally {
+    client.release();
+  }
 };
 
 // Helper function to save tokens to DB
-const saveTokensToDB = (userId, marketplace, accessToken, refreshToken, expiresIn) => {
-  const obtainedAt = Math.floor(Date.now() / 1000);
-  return new Promise((resolve, reject) => {
-    db.run("REPLACE INTO tokens (user_id, marketplace, access_token, refresh_token, expires_in, obtained_at) VALUES (?, ?, ?, ?, ?, ?)", 
-           [userId, marketplace, accessToken, refreshToken, expiresIn, obtainedAt], function(err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
+const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
+  const obtainedAt = Date.now(); // Store as milliseconds
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO tokens (user_id, marketplace, access_token, refresh_token, expires_in, obtained_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id, marketplace) DO UPDATE SET
+         access_token = EXCLUDED.access_token,
+         refresh_token = EXCLUDED.refresh_token,
+         expires_in = EXCLUDED.expires_in,
+         obtained_at = EXCLUDED.obtained_at`,
+      [userId, marketplace, accessToken, refreshToken, expiresIn, obtainedAt]
+    );
+  } finally {
+    client.release();
+  }
 };
 
 router.get("/auth-url", (req, res) => {
@@ -42,7 +45,7 @@ router.get("/auth-url", (req, res) => {
 
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
-  const userId = "default_user"; // For now, using a default user ID. This should be dynamic in a multi-user app.
+  const userId = "default_user"; // For now, using a default user ID.
   const marketplace = "mercadolivre";
 
   if (!code) {
@@ -66,7 +69,7 @@ router.post("/exchange-code", async (req, res) => {
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     
-    res.json({ message: "Token obtained and stored successfully in DB!" });
+    res.json({ message: "Token obtained and stored successfully in Supabase DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
     res.status(500).json({ message: "Error exchanging code for token", error: error.response ? error.response.data : error.message });
@@ -80,10 +83,10 @@ const getValidAccessToken = async (userId, marketplace) => {
     throw new Error("No tokens found for this user and marketplace. Please authenticate.");
   }
 
-  const currentTime = Math.floor(Date.now() / 1000);
-  const expirationTime = tokenData.obtained_at + tokenData.expires_in;
+  const currentTime = Date.now(); // Current time in milliseconds
+  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000); // Convert obtained_at to number and expires_in to ms
 
-  if (currentTime >= expirationTime - 300) { // Refresh if less than 5 minutes有效期
+  if (currentTime >= expirationTime - (5 * 60 * 1000)) { // Refresh if less than 5 minutes validity
     console.log("Access token expired or about to expire, refreshing...");
     try {
       const refreshResponse = await axios.post("https://api.mercadolibre.com/oauth/token", {
@@ -99,11 +102,10 @@ const getValidAccessToken = async (userId, marketplace) => {
       });
       const { access_token, refresh_token, expires_in } = refreshResponse.data;
       await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
-      console.log("Token refreshed and saved to DB.");
+      console.log("Token refreshed and saved to Supabase DB.");
       return access_token;
     } catch (refreshError) {
       console.error("Error refreshing token:", refreshError.response ? refreshError.response.data : refreshError.message);
-      // If refresh fails (e.g. refresh token also expired or revoked), re-authentication is needed
       throw new Error("Failed to refresh token. Please re-authenticate.");
     }
   }

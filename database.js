@@ -1,30 +1,44 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require("pg");
+require("dotenv").config(); // To load environment variables from a .env file if you use one locally
 
-// Determine the database path. If RENDER_DISK_PATH is set, use it (for Render.com persistent disk).
-// Otherwise, use a local file in the project directory.
-const dbPath = process.env.RENDER_DISK_PATH ? path.join(process.env.RENDER_DISK_PATH, 'dsseller.sqlite') : path.join(__dirname, 'dsseller.sqlite');
+const supabaseConnectionString = `postgresql://${process.env.SUPABASE_DB_USER || "postgres"}:${process.env.SUPABASE_DB_PASSWORD || "132497@Dsseller"}@${process.env.SUPABASE_DB_HOST || "db.omytwwzdkqecqogcfbst.supabase.co"}:${process.env.SUPABASE_DB_PORT || "5432"}/${process.env.SUPABASE_DB_NAME || "postgres"}`;
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database', err.message);
-  } else {
-    console.log(`Connected to the SQLite database at ${dbPath}`);
-    db.run(`CREATE TABLE IF NOT EXISTS tokens (
-      user_id TEXT NOT NULL,
-      marketplace TEXT NOT NULL,
-      access_token TEXT NOT NULL,
-      refresh_token TEXT NOT NULL,
-      expires_in INTEGER,
-      obtained_at INTEGER,
-      PRIMARY KEY (user_id, marketplace)
-    )`, (err) => {
-      if (err) {
-        console.error('Error creating tokens table', err.message);
-      }
-    });
+const pool = new Pool({
+  connectionString: supabaseConnectionString,
+  // Supabase recommends SSL for direct connections
+  ssl: {
+    rejectUnauthorized: false // For development/testing. For production, consider more secure SSL options.
   }
 });
 
-module.exports = db;
+const initializeDB = async () => {
+  try {
+    const client = await pool.connect();
+    console.log("Connected to Supabase PostgreSQL!");
+
+    // Create tokens table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tokens (
+        user_id TEXT NOT NULL,
+        marketplace TEXT NOT NULL,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        expires_in INTEGER,
+        obtained_at BIGINT, -- Changed to BIGINT for JS timestamp (milliseconds)
+        PRIMARY KEY (user_id, marketplace)
+      );
+    `);
+    console.log("Tokens table checked/created successfully.");
+    client.release();
+  } catch (err) {
+    console.error("Error connecting to or initializing Supabase PostgreSQL:", err.stack);
+    // Exit process if DB connection fails, as the app won't work
+    process.exit(1);
+  }
+};
+
+// Initialize DB on module load
+initializeDB();
+
+module.exports = pool;
 

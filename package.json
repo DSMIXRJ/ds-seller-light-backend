@@ -1,7 +1,7 @@
 {
-  "name": "dsseller-backend-sqlite",
+  "name": "dsseller-backend-supabase",
   "version": "1.0.0",
-  "description": "Backend for DS Seller with Mercado Livre integration and SQLite persistence",
+  "description": "Backend for DS Seller with Mercado Livre integration and Supabase PostgreSQL persistence",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,7 +12,7 @@
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "sqlite3": "^5.1.7"
+    "pg": "^8.11.3" 
   },
   "author": "Manus / DSMix RJ",
   "license": "ISC"
