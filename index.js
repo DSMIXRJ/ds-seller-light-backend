@@ -1,23 +1,35 @@
 const express = require("express");
-const cors = require("cors");
 const bodyParser = require("body-parser");
-const loginRoute = require("./routes/login");
-const mercadolivreRoute = require("./routes/mercadolivre"); // Nova linha: Importar a rota do Mercado Livre
+const cors = require("cors");
+const path = require("path");
+
+const loginRoutes = require("./routes/login");
+const mercadoLivreRoutes = require("./routes/mercadolivre");
+const db = require("./database"); // This will initialize the database connection and create tables if they don't exist
 
 const app = express();
-const PORT = process.env.PORT || 10000; // Utilizar a porta do ambiente ou 10000 como fallback
+const port = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Rota de login
-app.use("/api", loginRoute);
+// API routes
+app.use("/api/login", loginRoutes);
+app.use("/api/mercadolivre", mercadoLivreRoutes);
 
-// Nova linha: Usar a rota do Mercado Livre
-app.use("/api/mercadolivre", mercadolivreRoute);
+// Simple route for root path
+app.get("/", (req, res) => {
+  res.send("DS Seller Backend with SQLite is running!");
+});
 
-// Servidor online
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+  // Log the path where the database is expected to be, especially if on Render
+  if (process.env.RENDER_DISK_PATH) {
+    console.log(`Database is expected at: ${path.join(process.env.RENDER_DISK_PATH, 'dsseller.sqlite')}`);
+  } else {
+    console.log(`Database is expected at: ${path.join(__dirname, 'dsseller.sqlite')}`);
+  }
 });
 
