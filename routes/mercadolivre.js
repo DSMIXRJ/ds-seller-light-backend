@@ -5,10 +5,11 @@ const pool = require("../database.js"); // Path to database.js (Supabase Postgre
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "JBNXIsH4YqA1DqVqjV3n7tU8xWyVvJEO";
-const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
+// Alterado para usar a página inicial como callback
+const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br";
 
 // Helper function to get tokens from DB
-const getTokensFromDB = async (userId, marketplace) => {
+const getTokensFromDB = async (userId, marketplace ) => {
   const client = await pool.connect();
   try {
     const res = await client.query("SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2", [userId, marketplace]);
@@ -40,7 +41,7 @@ const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, ex
 
 router.get("/auth-url", (req, res) => {
   const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
-  res.json({ authUrl });
+  res.json({ authUrl } );
 });
 
 router.post("/exchange-code", async (req, res) => {
@@ -64,7 +65,7 @@ router.post("/exchange-code", async (req, res) => {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
       },
-    });
+    } );
 
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
@@ -99,7 +100,7 @@ const getValidAccessToken = async (userId, marketplace) => {
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "application/json",
         },
-      });
+      } );
       const { access_token, refresh_token, expires_in } = refreshResponse.data;
       await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
       console.log("Token refreshed and saved to Supabase DB.");
@@ -122,7 +123,7 @@ router.get("/user-info", async (req, res) => {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
-    });
+    } );
     res.json(userInfoResponse.data);
   } catch (error) {
     console.error("Error fetching user info:", error.message);
@@ -131,4 +132,5 @@ router.get("/user-info", async (req, res) => {
 });
 
 module.exports = router;
+
 
