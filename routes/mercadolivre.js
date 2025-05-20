@@ -44,6 +44,41 @@ router.get("/auth-url", (req, res) => {
   res.json({ authUrl });
 });
 
+// Novo endpoint GET para trocar código por token (evita problemas de CORS)
+router.get("/exchange-code-get", async (req, res) => {
+  const { code } = req.query;
+  const userId = "default_user"; // For now, using a default user ID.
+  const marketplace = "mercadolivre";
+
+  if (!code) {
+    return res.status(400).json({ message: "Authorization code is required as query parameter" });
+  }
+
+  try {
+    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+      grant_type: "authorization_code",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code: code,
+      redirect_uri: REDIRECT_URI,
+    }, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+      },
+    });
+
+    const { access_token, refresh_token, expires_in } = response.data;
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    
+    res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
+  } catch (error) {
+    console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
+    res.status(500).json({ message: "Error exchanging code for token", error: error.response ? error.response.data : error.message });
+  }
+});
+
+// Endpoint POST original para trocar código por token
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
   const userId = "default_user"; // For now, using a default user ID.
