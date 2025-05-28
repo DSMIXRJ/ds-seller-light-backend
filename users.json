@@ -6,5 +6,9 @@
   {
     "email": "andre@dsseller.com.br",
     "password": "dsadmin"
+  },
+  {
+    "email": "convidado",
+    "password": "123456"
   }
 ]
