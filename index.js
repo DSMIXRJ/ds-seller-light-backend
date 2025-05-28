@@ -1,6 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const axios = require("axios");
 require("dotenv").config(); // For local development, Render uses env vars directly
 
 console.log("[INDEX_LOG] Starting DS Seller Backend with PostgreSQL...");
@@ -41,33 +42,58 @@ app.use("/api/mercadolivre", mercadoLivreRoutes);
 // URL base Mercado Livre (Brasil)
 const ML_AUTH_URL = "https://auth.mercadolivre.com.br/authorization";
 
-// Rotas de OAuth
+// Rota para iniciar OAuth Mercado Livre
 app.get("/auth/meli", (req, res) => {
-  // Pegando variáveis de ambiente
   const clientId = process.env.ML_CLIENT_ID;
   const redirectUri = process.env.ML_REDIRECT_URI || "https://dsseller.com.br";
-
-  // Monta a URL de autorização
   const authUrl = `${ML_AUTH_URL}?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
-
-  // Redireciona o usuário para autenticação do Mercado Livre
   return res.redirect(authUrl);
 });
 
-// Rota de callback para receber o code (será configurada depois)
+// Rota de callback (recebe o code)
 app.get("/auth/callback", (req, res) => {
   const { code } = req.query;
   if (!code) {
     return res.status(400).send("Faltou o code de autorização do Mercado Livre.");
   }
-  // Exemplo: pode salvar o code ou prosseguir para trocar pelo token (implementar depois)
   res.send(
     "Autorização recebida do Mercado Livre! (code: " +
       code +
       "). Implemente aqui a troca pelo access token."
   );
+});
+
+// Rota para trocar o code pelo access token
+app.post("/auth/token", async (req, res) => {
+  const { code } = req.body;
+
+  try {
+    const response = await axios.post(
+      "https://api.mercadolibre.com/oauth/token",
+      null,
+      {
+        params: {
+          grant_type: "authorization_code",
+          client_id: process.env.ML_CLIENT_ID,
+          client_secret: process.env.ML_CLIENT_SECRET,
+          code,
+          redirect_uri: process.env.ML_REDIRECT_URI,
+        },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    res.json(response.data);
+  } catch (error) {
+    res.status(400).json({
+      error: "Erro ao trocar o code pelo access token.",
+      details: error.response?.data || error.message,
+    });
+  }
 });
 
 // ---------------------------------------------------------
