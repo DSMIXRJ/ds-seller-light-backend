@@ -52,47 +52,41 @@ app.get("/auth/meli", (req, res) => {
   return res.redirect(authUrl);
 });
 
-// Rota de callback (recebe o code)
-app.get("/auth/callback", (req, res) => {
+// Rota de callback (recebe o code e já troca automaticamente pelo access token)
+app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   if (!code) {
     return res.status(400).send("Faltou o code de autorização do Mercado Livre.");
   }
-  res.send(
-    "Autorização recebida do Mercado Livre! (code: " +
-      code +
-      "). Implemente aqui a troca pelo access token."
-  );
-});
-
-// Rota para trocar o code pelo access token
-app.post("/auth/token", async (req, res) => {
-  const { code } = req.body;
 
   try {
+    // Troca automática do code pelo access token
     const response = await axios.post(
       "https://api.mercadolibre.com/oauth/token",
-      null,
       {
-        params: {
-          grant_type: "authorization_code",
-          client_id: process.env.ML_CLIENT_ID,
-          client_secret: process.env.ML_CLIENT_SECRET,
-          code,
-          redirect_uri: process.env.ML_REDIRECT_URI,
-        },
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
+        grant_type: "authorization_code",
+        client_id: process.env.ML_CLIENT_ID,
+        client_secret: process.env.ML_CLIENT_SECRET,
+        code,
+        redirect_uri: process.env.ML_REDIRECT_URI,
+      },
+      {
+        headers: { "Content-Type": "application/json" },
       }
     );
 
-    res.json(response.data);
+    const { access_token, refresh_token, expires_in, user_id } = response.data;
+
+    res.send(`
+      <h2 style="color:green;">Integração realizada com sucesso!</h2>
+      <p><strong>Access token:</strong> ${access_token}</p>
+      <p><strong>Usuário:</strong> ${user_id}</p>
+      <p><strong>Expira em:</strong> ${expires_in} segundos</p>
+      <p><strong>Refresh token:</strong> ${refresh_token}</p>
+    `);
   } catch (error) {
-    res.status(400).json({
-      error: "Erro ao trocar o code pelo access token.",
-      details: error.response?.data || error.message,
-    });
+    console.error(error.response?.data || error.message);
+    res.status(400).send("Erro ao trocar o code pelo access token.<br>" + (error.response?.data?.message || error.message));
   }
 });
 
