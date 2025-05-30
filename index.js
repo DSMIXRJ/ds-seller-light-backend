@@ -52,7 +52,7 @@ app.get("/auth/meli", (req, res) => {
   return res.redirect(authUrl);
 });
 
-// Rota de callback (recebe o code e já troca automaticamente pelo access token, sem mostrar dados sensíveis)
+// Rota de callback (recebe o code, faz a troca e redireciona para o dashboard)
 app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   if (!code) {
@@ -60,7 +60,6 @@ app.get("/auth/callback", async (req, res) => {
   }
 
   try {
-    // Troca automática do code pelo access token
     await axios.post(
       "https://api.mercadolibre.com/oauth/token",
       {
@@ -75,10 +74,8 @@ app.get("/auth/callback", async (req, res) => {
       }
     );
 
-    res.send(`
-      <h2 style="color:green;">Integração realizada com sucesso!</h2>
-      <p>Agora você pode usar todos os recursos do DS SELLER LIGHT com sua conta Mercado Livre integrada.</p>
-    `);
+    // Redireciona direto para o dashboard do frontend após integração
+    res.redirect("https://dsseller.com.br/dashboard");
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(400).send("Erro ao trocar o code pelo access token.<br>" + (error.response?.data?.message || error.message));
