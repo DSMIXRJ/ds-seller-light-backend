@@ -74,8 +74,8 @@ app.get("/auth/callback", async (req, res) => {
       }
     );
 
-    // Redireciona direto para o dashboard do frontend após integração
-    res.redirect("https://dsseller.com.br/dashboard");
+    // Redireciona para o dashboard sinalizando integração bem-sucedida
+    res.redirect("https://dsseller.com.br/dashboard?ml_integrado=1");
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(400).send("Erro ao trocar o code pelo access token.<br>" + (error.response?.data?.message || error.message));
