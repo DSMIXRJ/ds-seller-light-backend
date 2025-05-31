@@ -5,7 +5,6 @@ const pool = require("../database.js"); // Path to database.js (PostgreSQL pool)
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
-// Usando o redirect_uri correto registado no Devcenter do Mercado Livre
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
 // Helper function to get tokens from DB
@@ -21,7 +20,7 @@ const getTokensFromDB = async (userId, marketplace) => {
 
 // Helper function to save tokens to DB
 const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
-  const obtainedAt = Date.now(); // Store as milliseconds
+  const obtainedAt = Date.now();
   const client = await pool.connect();
   try {
     await client.query(
@@ -44,10 +43,9 @@ router.get("/auth-url", (req, res) => {
   res.json({ authUrl });
 });
 
-// Novo endpoint GET para trocar código por token (evita problemas de CORS)
 router.get("/exchange-code-get", async (req, res) => {
   const { code } = req.query;
-  const userId = "default_user"; // For now, using a default user ID.
+  const userId = "default_user";
   const marketplace = "mercadolivre";
 
   if (!code) {
@@ -70,7 +68,7 @@ router.get("/exchange-code-get", async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
-    
+
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
@@ -78,10 +76,9 @@ router.get("/exchange-code-get", async (req, res) => {
   }
 });
 
-// Endpoint POST original para trocar código por token
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
-  const userId = "default_user"; // For now, using a default user ID.
+  const userId = "default_user";
   const marketplace = "mercadolivre";
 
   if (!code) {
@@ -104,7 +101,7 @@ router.post("/exchange-code", async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
-    
+
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
@@ -119,10 +116,10 @@ const getValidAccessToken = async (userId, marketplace) => {
     throw new Error("No tokens found for this user and marketplace. Please authenticate.");
   }
 
-  const currentTime = Date.now(); // Current time in milliseconds
-  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000); // Convert obtained_at to number and expires_in to ms
+  const currentTime = Date.now();
+  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000);
 
-  if (currentTime >= expirationTime - (5 * 60 * 1000)) { // Refresh if less than 5 minutes validity
+  if (currentTime >= expirationTime - (5 * 60 * 1000)) {
     console.log("Access token expired or about to expire, refreshing...");
     try {
       const refreshResponse = await axios.post("https://api.mercadolibre.com/oauth/token", {
@@ -163,6 +160,41 @@ router.get("/user-info", async (req, res) => {
   } catch (error) {
     console.error("Error fetching user info:", error.message);
     res.status(500).json({ message: "Error fetching user info", error: error.message });
+  }
+});
+
+// 🚀 NOVA ROTA — Listar anúncios ativos reais da conta Mercado Livre
+router.get("/anuncios/ml", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  try {
+    const accessToken = await getValidAccessToken(userId, marketplace);
+
+    const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const mlUserId = userResponse.data.id;
+
+    const searchResponse = await axios.get(
+      `https://api.mercadolibre.com/users/${mlUserId}/items/search?status=active`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const itemIds = searchResponse.data.results;
+
+    if (!itemIds.length) {
+      return res.json([]);
+    }
+
+    const detailResponse = await axios.get(
+      `https://api.mercadolibre.com/items?ids=${itemIds.slice(0, 50).join(",")}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    res.json(detailResponse.data);
+  } catch (error) {
+    console.error("Erro ao buscar anúncios do ML:", error.response?.data || error.message);
+    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.response?.data || error.message });
   }
 });
 
