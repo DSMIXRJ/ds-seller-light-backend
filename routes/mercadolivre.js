@@ -5,6 +5,7 @@ const pool = require("../database.js"); // Path to database.js (PostgreSQL pool)
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
+// Usando o redirect_uri correto registado no Devcenter do Mercado Livre
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
 // Helper function to get tokens from DB
@@ -20,7 +21,7 @@ const getTokensFromDB = async (userId, marketplace) => {
 
 // Helper function to save tokens to DB
 const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
-  const obtainedAt = Date.now();
+  const obtainedAt = Date.now(); // Store as milliseconds
   const client = await pool.connect();
   try {
     await client.query(
@@ -43,9 +44,10 @@ router.get("/auth-url", (req, res) => {
   res.json({ authUrl });
 });
 
+// Novo endpoint GET para trocar código por token (evita problemas de CORS)
 router.get("/exchange-code-get", async (req, res) => {
   const { code } = req.query;
-  const userId = "default_user";
+  const userId = "default_user"; // For now, using a default user ID.
   const marketplace = "mercadolivre";
 
   if (!code) {
@@ -68,7 +70,7 @@ router.get("/exchange-code-get", async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
-
+    
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
@@ -76,9 +78,10 @@ router.get("/exchange-code-get", async (req, res) => {
   }
 });
 
+// Endpoint POST original para trocar código por token
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
-  const userId = "default_user";
+  const userId = "default_user"; // For now, using a default user ID.
   const marketplace = "mercadolivre";
 
   if (!code) {
@@ -101,7 +104,7 @@ router.post("/exchange-code", async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
-
+    
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
@@ -116,10 +119,10 @@ const getValidAccessToken = async (userId, marketplace) => {
     throw new Error("No tokens found for this user and marketplace. Please authenticate.");
   }
 
-  const currentTime = Date.now();
-  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000);
+  const currentTime = Date.now(); // Current time in milliseconds
+  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000); // Convert obtained_at to number and expires_in to ms
 
-  if (currentTime >= expirationTime - (5 * 60 * 1000)) {
+  if (currentTime >= expirationTime - (5 * 60 * 1000)) { // Refresh if less than 5 minutes validity
     console.log("Access token expired or about to expire, refreshing...");
     try {
       const refreshResponse = await axios.post("https://api.mercadolibre.com/oauth/token", {
@@ -163,38 +166,94 @@ router.get("/user-info", async (req, res) => {
   }
 });
 
-// 🚀 NOVA ROTA — Listar anúncios ativos reais da conta Mercado Livre
-router.get("/anuncios/ml", async (req, res) => {
-  const userId = "default_user";
+// Nova rota para buscar anúncios do usuário autenticado
+router.get("/items", async (req, res) => {
+  const userId = "default_user"; // Para futuro: usar ID do usuário logado
   const marketplace = "mercadolivre";
 
   try {
+    // Obter token válido usando a função auxiliar existente
     const accessToken = await getValidAccessToken(userId, marketplace);
-
-    const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    
+    // Buscar informações do usuário para obter o seller_id
+    const userInfoResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
-    const mlUserId = userResponse.data.id;
-
-    const searchResponse = await axios.get(
-      `https://api.mercadolibre.com/users/${mlUserId}/items/search?status=active`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+    
+    const sellerId = userInfoResponse.data.id;
+    
+    // Buscar anúncios do vendedor
+    const itemsResponse = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      params: {
+        limit: 50, // Ajustar conforme necessidade
+        offset: 0,
+      },
+    });
+    
+    // Obter detalhes de cada anúncio
+    const itemIds = itemsResponse.data.results;
+    const itemDetailsPromises = itemIds.map(itemId => 
+      axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
     );
-    const itemIds = searchResponse.data.results;
-
-    if (!itemIds.length) {
-      return res.json([]);
-    }
-
-    const detailResponse = await axios.get(
-      `https://api.mercadolibre.com/items?ids=${itemIds.slice(0, 50).join(",")}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+    
+    // Obter estatísticas de visitas e vendas
+    const itemsWithDetails = await Promise.all(itemDetailsPromises);
+    const itemsData = itemsWithDetails.map(response => response.data);
+    
+    // Buscar estatísticas de visitas para cada item
+    const visitStatsPromises = itemIds.map(itemId => 
+      axios.get(`https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=30&unit=day`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }).catch(err => ({ data: { total_visits: 0 } })) // Fallback se API de visitas falhar
     );
-
-    res.json(detailResponse.data);
+    
+    const visitStats = await Promise.all(visitStatsPromises);
+    
+    // Formatar dados para o frontend
+    const formattedItems = itemsData.map((item, index) => {
+      // Calcular margem e lucro (exemplo simplificado)
+      const precoVenda = item.price;
+      const precoCusto = item.price * 0.6; // Exemplo: custo é 60% do preço de venda
+      const margemReais = precoVenda - precoCusto;
+      const margemPercentual = Math.round((margemReais / precoCusto) * 100);
+      
+      return {
+        id: item.id,
+        image: item.thumbnail,
+        estoque: item.available_quantity,
+        title: item.title,
+        precoVenda: precoVenda,
+        precoCusto: precoCusto,
+        margemPercentual: margemPercentual,
+        margemReais: margemReais.toFixed(2),
+        lucroTotal: (margemReais * item.sold_quantity).toFixed(2),
+        visitas: visitStats[index]?.data?.total_visits || 0,
+        vendas: item.sold_quantity,
+        promocao: item.official_store_id !== null, // Exemplo: considera como promoção se for loja oficial
+        permalink: item.permalink,
+        status: item.status,
+      };
+    });
+    
+    res.json(formattedItems);
   } catch (error) {
-    console.error("Erro ao buscar anúncios do ML:", error.response?.data || error.message);
-    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.response?.data || error.message });
+    console.error("Erro ao buscar anúncios:", error.message);
+    res.status(500).json({ 
+      message: "Erro ao buscar anúncios", 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
