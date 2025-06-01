@@ -26,7 +26,7 @@ app.use(
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
-  } )
+  })
 );
 
 app.use(bodyParser.json());
@@ -43,12 +43,12 @@ app.use("/api/mercadolivre", mercadoLivreRoutes);
 const ML_AUTH_URL = "https://auth.mercadolivre.com.br/authorization";
 
 // Rota para iniciar OAuth Mercado Livre
-app.get("/auth/meli", (req, res ) => {
+app.get("/auth/meli", (req, res) => {
   const clientId = process.env.ML_CLIENT_ID;
   const redirectUri = process.env.ML_REDIRECT_URI || "https://dsseller.com.br";
   const authUrl = `${ML_AUTH_URL}?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(
     redirectUri
-   )}`;
+  )}`;
   return res.redirect(authUrl);
 });
 
@@ -72,10 +72,10 @@ app.get("/auth/callback", async (req, res) => {
       {
         headers: { "Content-Type": "application/json" },
       }
-     );
+    );
 
     // Redireciona para o dashboard sinalizando integração bem-sucedida
-    res.redirect("https://dsseller.com.br/dashboard?ml_integrado=1" );
+    res.redirect("https://dsseller.com.br/dashboard?ml_integrado=1");
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(400).send("Erro ao trocar o code pelo access token.<br>" + (error.response?.data?.message || error.message));
@@ -90,11 +90,6 @@ app.get("/", (req, res) => {
   res.send(
     "DS Seller Backend with PostgreSQL is running! Check logs for DB status."
   );
-});
-
-// Adicionar rota de teste para verificar se a API está funcionando
-app.get("/api/test", (req, res) => {
-  res.json({ message: "API está funcionando corretamente!" });
 });
 
 app.listen(port, () => {
