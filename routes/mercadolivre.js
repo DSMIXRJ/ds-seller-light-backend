@@ -5,20 +5,14 @@ const pool = require("../database.js"); // Path to database.js (PostgreSQL pool)
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
+// Usando o redirect_uri correto registado no Devcenter do Mercado Livre
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
-// Sempre usar este userId para salvar e buscar tokens:
-const userId = "1"; // Use "1" para ambiente sem login, garantindo consistência
-const marketplace = "mercadolivre";
-
 // Helper function to get tokens from DB
-const getTokensFromDB = async () => {
+const getTokensFromDB = async (userId, marketplace) => {
   const client = await pool.connect();
   try {
-    const res = await client.query(
-      "SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2",
-      [userId, marketplace]
-    );
+    const res = await client.query("SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2", [userId, marketplace]);
     return res.rows[0];
   } finally {
     client.release();
@@ -26,7 +20,7 @@ const getTokensFromDB = async () => {
 };
 
 // Helper function to save tokens to DB
-const saveTokensToDB = async (accessToken, refreshToken, expiresIn) => {
+const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
   const obtainedAt = Date.now(); // Store as milliseconds
   const client = await pool.connect();
   try {
@@ -45,30 +39,21 @@ const saveTokensToDB = async (accessToken, refreshToken, expiresIn) => {
   }
 };
 
-// Helper function to remove tokens from DB
-const removeTokensFromDB = async () => {
-  const client = await pool.connect();
-  try {
-    await client.query(
-      "DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2",
-      [userId, marketplace]
-    );
-  } finally {
-    client.release();
-  }
-};
-
 router.get("/auth-url", (req, res) => {
   const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
   res.json({ authUrl });
 });
 
-// Troca código por token e salva (GET)
+// Novo endpoint GET para trocar código por token (evita problemas de CORS)
 router.get("/exchange-code-get", async (req, res) => {
   const { code } = req.query;
+  const userId = "default_user"; // For now, using a default user ID.
+  const marketplace = "mercadolivre";
+
   if (!code) {
     return res.status(400).json({ message: "Authorization code is required as query parameter" });
   }
+
   try {
     const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
       grant_type: "authorization_code",
@@ -84,7 +69,8 @@ router.get("/exchange-code-get", async (req, res) => {
     });
 
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(access_token, refresh_token, expires_in);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
@@ -92,12 +78,16 @@ router.get("/exchange-code-get", async (req, res) => {
   }
 });
 
-// Troca código por token e salva (POST)
+// Endpoint POST original para trocar código por token
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
+  const userId = "default_user"; // For now, using a default user ID.
+  const marketplace = "mercadolivre";
+
   if (!code) {
     return res.status(400).json({ message: "Authorization code is required" });
   }
+
   try {
     const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
       grant_type: "authorization_code",
@@ -113,24 +103,26 @@ router.post("/exchange-code", async (req, res) => {
     });
 
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(access_token, refresh_token, expires_in);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    
     res.json({ message: "Token obtained and stored successfully in PostgreSQL DB!" });
   } catch (error) {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
     res.status(500).json({ message: "Error exchanging code for token", error: error.response ? error.response.data : error.message });
   }
-};
+});
 
-// Função para obter access token válido
-const getValidAccessToken = async () => {
-  let tokenData = await getTokensFromDB();
+const getValidAccessToken = async (userId, marketplace) => {
+  let tokenData = await getTokensFromDB(userId, marketplace);
+
   if (!tokenData) {
     throw new Error("No tokens found for this user and marketplace. Please authenticate.");
   }
-  const currentTime = Date.now();
-  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000);
 
-  if (currentTime >= expirationTime - (5 * 60 * 1000)) {
+  const currentTime = Date.now(); // Current time in milliseconds
+  const expirationTime = Number(tokenData.obtained_at) + (tokenData.expires_in * 1000); // Convert obtained_at to number and expires_in to ms
+
+  if (currentTime >= expirationTime - (5 * 60 * 1000)) { // Refresh if less than 5 minutes validity
     console.log("Access token expired or about to expire, refreshing...");
     try {
       const refreshResponse = await axios.post("https://api.mercadolibre.com/oauth/token", {
@@ -145,7 +137,8 @@ const getValidAccessToken = async () => {
         },
       });
       const { access_token, refresh_token, expires_in } = refreshResponse.data;
-      await saveTokensToDB(access_token, refresh_token, expires_in);
+      await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+      console.log("Token refreshed and saved to PostgreSQL DB.");
       return access_token;
     } catch (refreshError) {
       console.error("Error refreshing token:", refreshError.response ? refreshError.response.data : refreshError.message);
@@ -155,133 +148,112 @@ const getValidAccessToken = async () => {
   return tokenData.access_token;
 };
 
-// Verifica status de integração
-router.get("/integration-status", async (req, res) => {
+router.get("/user-info", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
   try {
-    const tokenData = await getTokensFromDB();
-    if (!tokenData) return res.json({ integrated: false });
-
-    try {
-      const accessToken = await getValidAccessToken();
-      await axios.get("https://api.mercadolibre.com/users/me", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      return res.json({ integrated: true });
-    } catch {
-      await removeTokensFromDB();
-      return res.json({ integrated: false });
-    }
-  } catch (error) {
-    console.error("Erro ao checar status de integração:", error.message);
-    return res.status(500).json({ integrated: false });
-  }
-});
-
-// Remove integração
-router.delete("/remove-integration", async (req, res) => {
-  try {
-    await removeTokensFromDB();
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("Erro ao remover integração:", error.message);
-    return res.status(500).json({ success: false });
-  }
-});
-
-// Busca anúncios reais do Mercado Livre
-router.get("/items", async (req, res) => {
-  try {
-    const accessToken = await getValidAccessToken();
-
-    const userInfoResp = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const accessToken = await getValidAccessToken(userId, marketplace);
+    const userInfoResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
-    const sellerId = userInfoResp.data.id;
+    res.json(userInfoResponse.data);
+  } catch (error) {
+    console.error("Error fetching user info:", error.message);
+    res.status(500).json({ message: "Error fetching user info", error: error.message });
+  }
+});
 
-    const itemsResp = await axios.get(
-      `https://api.mercadolibre.com/users/${sellerId}/items/search`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    const itemIds = itemsResp.data.results;
-    if (!itemIds || itemIds.length === 0) return res.json([]);
+// Nova rota para buscar anúncios do usuário autenticado
+router.get("/items", async (req, res) => {
+  const userId = "default_user"; // Para futuro: usar ID do usuário logado
+  const marketplace = "mercadolivre";
 
-    const detailPromises = itemIds.map((id) =>
-      axios.get(`https://api.mercadolibre.com/items/${id}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+  try {
+    // Obter token válido usando a função auxiliar existente
+    const accessToken = await getValidAccessToken(userId, marketplace);
+    
+    // Buscar informações do usuário para obter o seller_id
+    const userInfoResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    
+    const sellerId = userInfoResponse.data.id;
+    
+    // Buscar anúncios do vendedor
+    const itemsResponse = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      params: {
+        limit: 50, // Ajustar conforme necessidade
+        offset: 0,
+      },
+    });
+    
+    // Obter detalhes de cada anúncio
+    const itemIds = itemsResponse.data.results;
+    const itemDetailsPromises = itemIds.map(itemId => 
+      axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       })
     );
-    const details = await Promise.all(detailPromises);
-
-    const visitPromises = itemIds.map((id) =>
-      axios
-        .get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
-        .catch(() => ({ data: { total_visits: 0 } }))
+    
+    // Obter estatísticas de visitas e vendas
+    const itemsWithDetails = await Promise.all(itemDetailsPromises);
+    const itemsData = itemsWithDetails.map(response => response.data);
+    
+    // Buscar estatísticas de visitas para cada item
+    const visitStatsPromises = itemIds.map(itemId => 
+      axios.get(`https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=30&unit=day`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }).catch(err => ({ data: { total_visits: 0 } })) // Fallback se API de visitas falhar
     );
-    const visits = await Promise.all(visitPromises);
-
-    const formatted = details.map((resp, idx) => {
-      const item = resp.data;
+    
+    const visitStats = await Promise.all(visitStatsPromises);
+    
+    // Formatar dados para o frontend
+    const formattedItems = itemsData.map((item, index) => {
+      // Calcular margem e lucro (exemplo simplificado)
       const precoVenda = item.price;
-      const precoCusto = item.price * 0.6;
+      const precoCusto = item.price * 0.6; // Exemplo: custo é 60% do preço de venda
       const margemReais = precoVenda - precoCusto;
       const margemPercentual = Math.round((margemReais / precoCusto) * 100);
-
+      
       return {
         id: item.id,
         image: item.thumbnail,
         estoque: item.available_quantity,
         title: item.title,
-        precoVenda,
-        precoCusto,
-        margemPercentual,
+        precoVenda: precoVenda,
+        precoCusto: precoCusto,
+        margemPercentual: margemPercentual,
         margemReais: margemReais.toFixed(2),
         lucroTotal: (margemReais * item.sold_quantity).toFixed(2),
-        visitas: visits[idx].data.total_visits || 0,
+        visitas: visitStats[index]?.data?.total_visits || 0,
         vendas: item.sold_quantity,
-        promocao: item.official_store_id !== null,
+        promocao: item.official_store_id !== null, // Exemplo: considera como promoção se for loja oficial
         permalink: item.permalink,
         status: item.status,
       };
     });
-
-    return res.json(formatted);
+    
+    res.json(formattedItems);
   } catch (error) {
     console.error("Erro ao buscar anúncios:", error.message);
-    // Retornar mock em caso de falha
-    return res.status(200).json([
-      {
-        id: "MOCK_ID_1",
-        image: "https://via.placeholder.com/64",
-        estoque: 13,
-        title: "Produto Simulado (Erro ao buscar anúncios reais)",
-        precoVenda: 199.99,
-        precoCusto: 100.0,
-        margemPercentual: 50,
-        margemReais: "99.99",
-        lucroTotal: "1599.92",
-        visitas: 200,
-        vendas: 8,
-        promocao: true,
-        permalink: "#",
-        status: "active",
-      },
-    ]);
-  }
-});
-
-// Pega informações do usuário (opcional)
-router.get("/user-info", async (req, res) => {
-  try {
-    const accessToken = await getValidAccessToken();
-    const userInfoResp = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    res.status(500).json({ 
+      message: "Erro ao buscar anúncios", 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
-    return res.json(userInfoResp.data);
-  } catch (error) {
-    console.error("Erro ao buscar informações do usuário:", error.message);
-    return res.status(500).json({ message: "Erro ao buscar informações do usuário." });
   }
 });
 
