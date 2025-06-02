@@ -141,6 +141,7 @@ router.get("/auth/callback", async (req, res) => {
     const saved = await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     if (!saved) throw new Error("Falha ao salvar tokens no banco.");
 
+    // AQUI ESTÁ O REDIRECIONAMENTO CORRIGIDO
     return res.redirect("https://dsseller.com.br/integracoes?ml_integrado=1");
   } catch (err) {
     console.error("Erro no callback OAuth ML:", err.response?.data || err.message);
