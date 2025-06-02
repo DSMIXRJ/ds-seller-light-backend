@@ -39,9 +39,80 @@ const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, ex
   }
 };
 
+// Helper function to remove tokens from DB
+const removeTokensFromDB = async (userId, marketplace) => {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      "DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2",
+      [userId, marketplace]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error removing tokens:", error);
+    return false;
+  } finally {
+    client.release();
+  }
+};
+
 router.get("/auth-url", (req, res) => {
   const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
   res.json({ authUrl });
+});
+
+// Novo endpoint para verificar status de integração
+router.get("/integration-status", async (req, res) => {
+  const userId = "default_user"; // Para futuro: usar ID do usuário logado
+  const marketplace = "mercadolivre";
+
+  try {
+    const tokenData = await getTokensFromDB(userId, marketplace);
+    
+    if (!tokenData) {
+      return res.json({ integrated: false });
+    }
+
+    // Verificar se o token ainda é válido
+    try {
+      const accessToken = await getValidAccessToken(userId, marketplace);
+      // Se chegou aqui, o token é válido
+      return res.json({ integrated: true });
+    } catch (error) {
+      // Se houve erro ao obter token válido, considerar não integrado
+      console.error("Error validating token:", error);
+      return res.json({ integrated: false });
+    }
+  } catch (error) {
+    console.error("Error checking integration status:", error);
+    res.status(500).json({ 
+      message: "Error checking integration status", 
+      error: error.message 
+    });
+  }
+});
+
+// Novo endpoint para remover integração
+router.delete("/remove-integration", async (req, res) => {
+  const userId = "default_user"; // Para futuro: usar ID do usuário logado
+  const marketplace = "mercadolivre";
+
+  try {
+    const removed = await removeTokensFromDB(userId, marketplace);
+    
+    if (removed) {
+      res.json({ success: true, message: "Integration removed successfully" });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to remove integration" });
+    }
+  } catch (error) {
+    console.error("Error removing integration:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error removing integration", 
+      error: error.message 
+    });
+  }
 });
 
 // Novo endpoint GET para trocar código por token (evita problemas de CORS)
@@ -163,97 +234,6 @@ router.get("/user-info", async (req, res) => {
   } catch (error) {
     console.error("Error fetching user info:", error.message);
     res.status(500).json({ message: "Error fetching user info", error: error.message });
-  }
-});
-
-// Nova rota para buscar anúncios do usuário autenticado
-router.get("/items", async (req, res) => {
-  const userId = "default_user"; // Para futuro: usar ID do usuário logado
-  const marketplace = "mercadolivre";
-
-  try {
-    // Obter token válido usando a função auxiliar existente
-    const accessToken = await getValidAccessToken(userId, marketplace);
-    
-    // Buscar informações do usuário para obter o seller_id
-    const userInfoResponse = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    
-    const sellerId = userInfoResponse.data.id;
-    
-    // Buscar anúncios do vendedor
-    const itemsResponse = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      params: {
-        limit: 50, // Ajustar conforme necessidade
-        offset: 0,
-      },
-    });
-    
-    // Obter detalhes de cada anúncio
-    const itemIds = itemsResponse.data.results;
-    const itemDetailsPromises = itemIds.map(itemId => 
-      axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    );
-    
-    // Obter estatísticas de visitas e vendas
-    const itemsWithDetails = await Promise.all(itemDetailsPromises);
-    const itemsData = itemsWithDetails.map(response => response.data);
-    
-    // Buscar estatísticas de visitas para cada item
-    const visitStatsPromises = itemIds.map(itemId => 
-      axios.get(`https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=30&unit=day`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }).catch(err => ({ data: { total_visits: 0 } })) // Fallback se API de visitas falhar
-    );
-    
-    const visitStats = await Promise.all(visitStatsPromises);
-    
-    // Formatar dados para o frontend
-    const formattedItems = itemsData.map((item, index) => {
-      // Calcular margem e lucro (exemplo simplificado)
-      const precoVenda = item.price;
-      const precoCusto = item.price * 0.6; // Exemplo: custo é 60% do preço de venda
-      const margemReais = precoVenda - precoCusto;
-      const margemPercentual = Math.round((margemReais / precoCusto) * 100);
-      
-      return {
-        id: item.id,
-        image: item.thumbnail,
-        estoque: item.available_quantity,
-        title: item.title,
-        precoVenda: precoVenda,
-        precoCusto: precoCusto,
-        margemPercentual: margemPercentual,
-        margemReais: margemReais.toFixed(2),
-        lucroTotal: (margemReais * item.sold_quantity).toFixed(2),
-        visitas: visitStats[index]?.data?.total_visits || 0,
-        vendas: item.sold_quantity,
-        promocao: item.official_store_id !== null, // Exemplo: considera como promoção se for loja oficial
-        permalink: item.permalink,
-        status: item.status,
-      };
-    });
-    
-    res.json(formattedItems);
-  } catch (error) {
-    console.error("Erro ao buscar anúncios:", error.message);
-    res.status(500).json({ 
-      message: "Erro ao buscar anúncios", 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
   }
 });
 
