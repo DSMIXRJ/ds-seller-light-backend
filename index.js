@@ -107,9 +107,9 @@ app.get("/auth/callback", async (req, res) => {
       // Continuar mesmo com erro no banco
     }
 
-    // Redireciona para o dashboard sinalizando integração bem-sucedida
-    console.log("[INDEX_LOG] Redirecionando para dashboard com flag ml_integrado=1");
-    res.redirect("https://dsseller.com.br/dashboard?ml_integrado=1" );
+    // Redireciona para a página de integrações sinalizando integração bem-sucedida
+    console.log("[INDEX_LOG] Redirecionando para integrações com flag ml_integrado=1");
+    res.redirect("https://dsseller.com.br/integracoes?ml_integrado=1" );
   } catch (error) {
     console.error("[INDEX_LOG] Erro ao trocar code por token:", error.response?.data || error.message);
     res.status(400).send("Erro ao trocar o code pelo access token.<br>" + (error.response?.data?.message || error.message));
