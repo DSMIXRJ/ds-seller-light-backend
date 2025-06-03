@@ -14,6 +14,7 @@ console.log(`[DB_LOG] Read Render PG Config: HOST=${dbHost}, USER=${dbUser}, DB_
 
 if (!dbHost || !dbUser || !dbPassword || !dbName || !dbPort) {
   console.error("[DB_ERROR] Missing one or more Render PostgreSQL environment variables!");
+  // Considerar lançar um erro ou sair em produção
 }
 
 const pool = new Pool({
@@ -22,6 +23,10 @@ const pool = new Pool({
   password: dbPassword,
   database: dbName,
   port: parseInt(dbPort, 10),
+  // SSL não é geralmente necessário para conexões internas no Render, mas pode ser adicionado se exigido.
+  // ssl: {
+  //   rejectUnauthorized: false, 
+  // },
 });
 
 pool.on("connect", () => {
@@ -47,7 +52,6 @@ const initializeDB = async () => {
         refresh_token TEXT NOT NULL,
         expires_in INTEGER NOT NULL,
         obtained_at BIGINT NOT NULL,
-        origem TEXT DEFAULT 'ml',
         PRIMARY KEY (user_id, marketplace)
       );
     `);
@@ -65,3 +69,4 @@ const initializeDB = async () => {
 initializeDB();
 
 module.exports = pool;
+
