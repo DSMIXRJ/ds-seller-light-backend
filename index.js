@@ -1,42 +1,37 @@
-// routes/anuncios.js
+// index.js
 
+require("dotenv").config();
 const express = require("express");
-const axios = require("axios");
-const pool = require("../database");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const authRoutes = require("./routes/mercadolivre");
+const anunciosRoutes = require("./routes/anuncios");
 
-const router = express.Router();
+const app = express();
+const PORT = process.env.PORT || 10000;
 
-router.get("/ml", async (req, res) => {
-  try {
-    const client = await pool.connect();
-    const result = await client.query("SELECT access_token FROM tokens WHERE plataforma = 'mercadolivre' ORDER BY id DESC LIMIT 1");
-    client.release();
+// Middlewares
+app.use(cors());
+app.use(bodyParser.json());
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Token de acesso não encontrado." });
-    }
+// Logs
+console.log("[INDEX_LOG] Configurando CORS, bodyParser, e porta " + PORT);
+console.log("[INDEX_LOG] Setting up API routes...");
 
-    const accessToken = result.rows[0].access_token;
+// Rotas
+app.use("/auth", authRoutes);
+app.use("/anuncios", anunciosRoutes);
 
-    // Requisição para buscar os anúncios ativos do vendedor
-    const response = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    const userId = response.data.id;
-
-    const itemsResponse = await axios.get(
-      `https://api.mercadolibre.com/users/${userId}/items/search?status=active`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
-
-    return res.json({ anuncios: itemsResponse.data.results });
-  } catch (error) {
-    console.error("[ANUNCIOS_LOG] Erro ao buscar anúncios:", error.message);
-    return res.status(500).json({ error: "Erro ao buscar anúncios." });
-  }
+app.get("/", (req, res) => {
+  console.log("[INDEX_LOG] Root path / was accessed.");
+  res.send("DS Seller Backend rodando com sucesso.");
 });
 
-module.exports = router;
+// Inicia servidor
+app.listen(PORT, () => {
+  console.log(`[INDEX_LOG] Server is running on port ${PORT}.`);
+});
+
+// PostgreSQL log (handled inside database.js)
+console.log("[INDEX_LOG] PostgreSQL connection attempt is handled by database.js on load.");
+console.log("[INDEX_LOG] Check earlier logs for [DB_LOG] messages from database.js.");
