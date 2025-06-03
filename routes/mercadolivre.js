@@ -43,4 +43,40 @@ router.get("/auth/callback", async (req, res) => {
   }
 });
 
+// Rota para obter os anúncios do usuário autenticado
+router.get("/items", async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: "Token de acesso não encontrado." });
+  }
+
+  try {
+    // Busca os dados do usuário logado
+    const userResponse = await axios.get(
+      `https://api.mercadolibre.com/users/me`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const userId = userResponse.data.id;
+
+    // Busca os anúncios do usuário
+    const itemsResponse = await axios.get(
+      `https://api.mercadolibre.com/users/${userId}/items/search`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    res.json(itemsResponse.data);
+  } catch (error) {
+    console.error("Erro ao buscar anúncios:", error.response?.data || error.message);
+    res.status(500).json({ error: "Erro ao buscar anúncios." });
+  }
+});
+
 module.exports = router;
