@@ -6,6 +6,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const authRoutes = require("./routes/mercadolivre");
 const anunciosRoutes = require("./routes/anuncios");
+const pool = require("./database");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
