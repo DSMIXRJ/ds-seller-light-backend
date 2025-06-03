@@ -1,10 +1,9 @@
-// index.js 
-
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const authRoutes = require("./routes/mercadolivre");
+const loginRoutes = require("./routes/login");
 const pool = require("./database");
 
 const app = express();
@@ -20,6 +19,7 @@ console.log("[INDEX_LOG] Setting up API routes...");
 
 // Rotas
 app.use("/auth", authRoutes);
+app.use("/api/login", loginRoutes);
 
 app.get("/", (req, res) => {
   console.log("[INDEX_LOG] Root path / was accessed.");
