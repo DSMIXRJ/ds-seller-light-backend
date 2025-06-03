@@ -4,6 +4,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const authRoutes = require("./routes/mercadolivre");
 const loginRoutes = require("./routes/login");
+const anunciosRoutes = require("./routes/anuncios");
 const pool = require("./database");
 
 const app = express();
@@ -20,6 +21,7 @@ console.log("[INDEX_LOG] Setting up API routes...");
 // Rotas
 app.use("/auth", authRoutes);
 app.use("/api/login", loginRoutes);
+app.use("/anuncios", anunciosRoutes);
 
 app.get("/", (req, res) => {
   console.log("[INDEX_LOG] Root path / was accessed.");
