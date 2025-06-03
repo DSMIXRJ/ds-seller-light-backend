@@ -109,7 +109,7 @@ router.post("/exchange-code", async (req, res) => {
     console.error("Error exchanging code for token:", error.response ? error.response.data : error.message);
     res.status(500).json({ message: "Error exchanging code for token", error: error.response ? error.response.data : error.message });
   }
-});
+};
 
 const getValidAccessToken = async (userId, marketplace) => {
   let tokenData = await getTokensFromDB(userId, marketplace);
@@ -233,9 +233,9 @@ router.get("/items", async (req, res) => {
   }
 });
 
-// Redirecionamento após callback
+// ✅ Redirecionar para a tela de integração após login com Mercado Livre
 router.get("/auth/callback", (req, res) => {
-  res.redirect("https://dsseller.com.br/integracoes");
+  res.redirect("https://dsseller.com.br/integracoes?ml_integrado=1");
 });
 
 module.exports = router;
