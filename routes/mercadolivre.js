@@ -8,7 +8,7 @@ let accessToken = null;
 let refreshToken = null;
 
 // Redireciona o usuário para o login do Mercado Livre
-router.get("/auth/meli", (req, res) => {
+router.get("/meli", (req, res) => {
   const clientId = process.env.ML_CLIENT_ID;
   const redirectUri = process.env.ML_REDIRECT_URI;
 
@@ -17,7 +17,7 @@ router.get("/auth/meli", (req, res) => {
 });
 
 // Recebe o código e troca por access_token
-router.get("/auth/callback", async (req, res) => {
+router.get("/callback", async (req, res) => {
   const code = req.query.code;
 
   try {
