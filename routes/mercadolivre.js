@@ -7,6 +7,7 @@ const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
+// Recupera tokens do banco
 const getTokensFromDB = async (userId, marketplace) => {
   const client = await pool.connect();
   try {
@@ -20,6 +21,7 @@ const getTokensFromDB = async (userId, marketplace) => {
   }
 };
 
+// Salva tokens no banco
 const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
   const obtainedAt = Date.now();
   const client = await pool.connect();
@@ -44,6 +46,7 @@ router.get("/auth-url", (req, res) => {
   res.json({ authUrl });
 });
 
+// Troca código por token (GET)
 router.get("/exchange-code-get", async (req, res) => {
   const { code } = req.query;
   const userId = "default_user";
@@ -59,7 +62,6 @@ router.get("/exchange-code-get", async (req, res) => {
       code,
       redirect_uri: REDIRECT_URI,
     });
-
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     res.json({ message: "Token stored successfully" });
@@ -68,6 +70,7 @@ router.get("/exchange-code-get", async (req, res) => {
   }
 });
 
+// Troca código por token (POST)
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
   const userId = "default_user";
@@ -83,7 +86,6 @@ router.post("/exchange-code", async (req, res) => {
       code,
       redirect_uri: REDIRECT_URI,
     });
-
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     res.json({ message: "Token stored successfully" });
@@ -92,11 +94,12 @@ router.post("/exchange-code", async (req, res) => {
   }
 });
 
+// Garante token válido
 const getValidAccessToken = async (userId, marketplace) => {
   const tokenData = await getTokensFromDB(userId, marketplace);
   if (!tokenData) throw new Error("No tokens found. Please authenticate.");
-
   const expirationTime = Number(tokenData.obtained_at) + tokenData.expires_in * 1000;
+
   if (Date.now() >= expirationTime - 5 * 60 * 1000) {
     const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
       grant_type: "refresh_token",
@@ -104,7 +107,6 @@ const getValidAccessToken = async (userId, marketplace) => {
       client_secret: CLIENT_SECRET,
       refresh_token: tokenData.refresh_token,
     });
-
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     return access_token;
@@ -113,6 +115,7 @@ const getValidAccessToken = async (userId, marketplace) => {
   return tokenData.access_token;
 };
 
+// Dados do usuário autenticado
 router.get("/user-info", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -128,6 +131,7 @@ router.get("/user-info", async (req, res) => {
   }
 });
 
+// Lista de anúncios com estatísticas e SKU
 router.get("/items", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -172,7 +176,7 @@ router.get("/items", async (req, res) => {
 
       return {
         id: item.id,
-        sku: item.seller_custom_field || "—",
+        sku: item.seller_custom_field || "—", // Aqui entra o SKU real
         image: item.thumbnail,
         estoque: item.available_quantity,
         title: item.title,
