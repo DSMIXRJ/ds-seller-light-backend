@@ -158,6 +158,15 @@ router.get("/items", async (req, res) => {
       )
     );
 
+    // Debug: Log da estrutura do primeiro item para investigar campos SKU
+    if (itemDetails.length > 0) {
+      console.log("=== DEBUG: Estrutura do item ===");
+      console.log("Item completo:", JSON.stringify(itemDetails[0].data, null, 2));
+      console.log("Attributes:", itemDetails[0].data.attributes);
+      console.log("Seller custom field:", itemDetails[0].data.seller_custom_field);
+      console.log("================================");
+    }
+
     const visitStats = await Promise.all(
       itemIds.map(id =>
         axios
@@ -174,9 +183,44 @@ router.get("/items", async (req, res) => {
       const precoCusto = precoVenda * 0.6;
       const margem = precoVenda - precoCusto;
 
+      // Buscar SKU em múltiplas fontes possíveis
+      let sku = "—";
+      
+      // 1. Verificar se há variations (produtos com variações podem ter SKU nas variações)
+      if (item.variations && item.variations.length > 0) {
+        const firstVariation = item.variations[0];
+        if (firstVariation.seller_custom_field) {
+          sku = firstVariation.seller_custom_field;
+        }
+      }
+      
+      // 2. Buscar nos attributes do item principal
+      if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
+        const skuAttribute = item.attributes.find(attr => 
+          attr.id === "SELLER_SKU" || 
+          attr.id === "SKU" || 
+          attr.name === "SKU" ||
+          attr.name === "Código de identificação" ||
+          attr.value_id === "SELLER_SKU"
+        );
+        if (skuAttribute) {
+          sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
+        }
+      }
+      
+      // 3. Fallback para seller_custom_field do item principal
+      if (sku === "—" && item.seller_custom_field) {
+        sku = item.seller_custom_field;
+      }
+      
+      // 4. Se ainda não encontrou, usar parte do ID como identificador
+      if (sku === "—") {
+        sku = item.id.substring(3, 11); // Pega uma parte do ID que não seja "MLB"
+      }
+
       return {
         id: item.id,
-        sku: item.seller_custom_field || item.id.substring(0, 8) || "—", // SKU usando ID se não houver custom field
+        sku: sku,
         image: item.thumbnail,
         estoque: item.available_quantity,
         title: item.title,
