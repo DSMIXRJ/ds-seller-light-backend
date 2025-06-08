@@ -245,3 +245,93 @@ router.get("/items", async (req, res) => {
 });
 
 module.exports = router;
+
+// Endpoint para verificar status de integração do Mercado Livre
+router.get("/status", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  try {
+    const tokenData = await getTokensFromDB(userId, marketplace);
+    
+    if (!tokenData) {
+      return res.json({ integrated: false, message: "No tokens found" });
+    }
+
+    // Verificar se o token ainda é válido
+    const expirationTime = Number(tokenData.obtained_at) + tokenData.expires_in * 1000;
+    const isExpired = Date.now() >= expirationTime - 5 * 60 * 1000; // 5 minutos de margem
+
+    if (isExpired) {
+      try {
+        // Tentar renovar o token
+        const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          refresh_token: tokenData.refresh_token,
+        });
+        
+        const { access_token, refresh_token, expires_in } = response.data;
+        await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+        
+        return res.json({ integrated: true, message: "Token refreshed successfully" });
+      } catch (refreshError) {
+        // Se não conseguir renovar, considerar como não integrado
+        return res.json({ integrated: false, message: "Token expired and refresh failed" });
+      }
+    }
+
+    // Token ainda válido
+    return res.json({ integrated: true, message: "Integration active" });
+  } catch (error) {
+    console.error("Error checking ML status:", error.message);
+    res.status(500).json({ integrated: false, message: "Error checking status", error: error.message });
+  }
+});
+
+// Endpoint para remover integração do Mercado Livre
+router.delete("/remove", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  try {
+    // Primeiro, obter o token para revogar no Mercado Livre
+    const tokenData = await getTokensFromDB(userId, marketplace);
+    
+    if (tokenData && tokenData.access_token) {
+      try {
+        // Revogar o token no Mercado Livre
+        await axios.post("https://api.mercadolibre.com/oauth/token/revoke", {
+          access_token: tokenData.access_token
+        }, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        });
+        console.log("Token revoked successfully from Mercado Livre");
+      } catch (revokeError) {
+        console.warn("Warning: Could not revoke token from Mercado Livre:", revokeError.message);
+        // Continuar mesmo se não conseguir revogar no ML
+      }
+    }
+
+    // Remover tokens do banco de dados
+    const client = await pool.connect();
+    try {
+      await client.query(
+        "DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2",
+        [userId, marketplace]
+      );
+      console.log("Tokens removed from database");
+    } finally {
+      client.release();
+    }
+
+    res.json({ success: true, message: "Integration removed successfully" });
+  } catch (error) {
+    console.error("Error removing ML integration:", error.message);
+    res.status(500).json({ success: false, message: "Error removing integration", error: error.message });
+  }
+});
+
