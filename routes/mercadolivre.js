@@ -1,4 +1,3 @@
-// ARQUIVO: backend/routes/mercadolivre.js
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
@@ -76,5 +75,169 @@ router.get("/config", async (req, res) => {
   }
 });
 
-// As demais rotas seguem inalteradas — já incluídas corretamente no arquivo anterior enviado.
-// Pode colar este bloco no topo do seu mercadolivre.js anterior ou pedir o arquivo final completo com todas as rotas se preferir recomeçar do zero.
+// Endpoint para salvar o preço de custo
+router.post("/items/update-cost", async (req, res) => {
+  const { id, precoCusto } = req.body;
+
+  if (!id || precoCusto === undefined) {
+    return res.status(400).json({ message: "ID do produto e preço de custo são obrigatórios." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO product_costs (product_id, preco_custo)
+       VALUES ($1, $2)
+       ON CONFLICT (product_id) DO UPDATE SET
+         preco_custo = EXCLUDED.preco_custo`,
+      [id, precoCusto]
+    );
+    res.json({ success: true, message: "Preço de custo salvo com sucesso." });
+  } catch (error) {
+    console.error(`Erro ao salvar preco_custo para ${id}:`, error.message);
+    res.status(500).json({ success: false, message: "Erro ao salvar preço de custo", error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Endpoint para simular custos do Mercado Livre
+router.get("/costs_simulator", async (req, res) => {
+  const { price, category_id, listing_type_id, site_id } = req.query;
+
+  if (!price || !category_id || !listing_type_id || !site_id) {
+    return res.status(400).json({ message: "Parâmetros obrigatórios ausentes para o simulador de custos." });
+  }
+
+  try {
+    const response = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${price}&category_id=${category_id}&listing_type_id=${listing_type_id}&site_id=${site_id}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error("Erro ao chamar o simulador de custos do ML:", error.message);
+    res.status(500).json({ message: "Erro ao simular custos do Mercado Livre", error: error.message });
+  }
+});
+
+// Lista de anúncios
+router.get("/items", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  try {
+    const accessToken = await getValidAccessToken(userId, marketplace);
+    const userInfo = await axios.get("https://api.mercadolivre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const sellerId = userInfo.data.id;
+    const itemList = await axios.get(`https://api.mercadolivre.com/users/${sellerId}/items/search`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 50, offset: 0 },
+    });
+
+    const itemIds = itemList.data.results;
+
+    const itemDetails = await Promise.all(
+      itemIds.map(async (id) => {
+        const itemResponse = await axios.get(`https://api.mercadolivre.com/items/${id}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const item = itemResponse.data;
+
+        let totalCostML = 0;
+        if (item.price && item.category_id && item.listing_type_id) {
+          try {
+            const simulatorResponse = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${item.price}&category_id=${item.category_id}&listing_type_id=${item.listing_type_id}&site_id=${item.site_id}`);
+            totalCostML = simulatorResponse.data.total_cost;
+          } catch (simError) {
+            console.warn(`Erro ao simular custos para o item ${id}:`, simError.message);
+          }
+        }
+
+        let sku = "—";
+        if (item.variations && item.variations.length > 0) {
+          const firstVariation = item.variations[0];
+          if (firstVariation.seller_custom_field) {
+            sku = firstVariation.seller_custom_field;
+          }
+        }
+        if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
+          const skuAttribute = item.attributes.find(attr =>
+            attr.id === "SELLER_SKU" ||
+            attr.id === "SKU" ||
+            attr.name === "SKU" ||
+            attr.name === "Código de identificação" ||
+            attr.value_id === "SELLER_SKU"
+          );
+          if (skuAttribute) {
+            sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
+          }
+        }
+        if (sku === "—" && item.seller_custom_field) {
+          sku = item.seller_custom_field;
+        }
+        if (sku === "—") {
+          sku = item.id.substring(3, 11);
+        }
+
+        let precoCustoSalvo = 0;
+        const client = await pool.connect();
+        try {
+          const res = await client.query("SELECT preco_custo FROM product_costs WHERE product_id = $1", [item.id]);
+          if (res.rows.length > 0) {
+            precoCustoSalvo = parseFloat(res.rows[0].preco_custo);
+            if (isNaN(precoCustoSalvo) || !isFinite(precoCustoSalvo)) {
+              precoCustoSalvo = 0;
+            }
+          }
+        } catch (dbError) {
+          console.error(`Erro ao buscar preco_custo para ${item.id}:`, dbError.message);
+        } finally {
+          client.release();
+        }
+
+        return {
+          id: item.id,
+          sku: sku,
+          image: item.thumbnail,
+          estoque: item.available_quantity,
+          title: item.title,
+          precoVenda: item.price,
+          precoCusto: precoCustoSalvo,
+          totalCostML: totalCostML,
+          visitas: 0,
+          vendas: item.sold_quantity,
+          promocao: item.official_store_id !== null,
+          permalink: item.permalink,
+          status: item.status,
+          category_id: item.category_id,
+          listing_type_id: item.listing_type_id,
+          site_id: item.site_id,
+        };
+      })
+    );
+
+    const visitStats = await Promise.all(
+      itemIds.map(id =>
+        axios
+          .get(`https://api.mercadolivre.com/items/${id}/visits/time_window?last=30&unit=day`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          })
+          .catch(() => ({ data: { total_visits: 0 } }))
+      )
+    );
+
+    const finalFormatted = itemDetails.map((item, i) => ({
+      ...item,
+      visitas: visitStats[i]?.data?.total_visits || 0,
+    }));
+
+    res.json(finalFormatted);
+  } catch (error) {
+    console.error("Erro ao buscar anúncios:", error.message);
+    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
+  }
+});
+
+// EXPORTAÇÃO CORRETA
+module.exports = router;
