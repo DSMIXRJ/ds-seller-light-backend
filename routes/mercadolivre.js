@@ -2,23 +2,21 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 const pool = require("../database.js");
-const fs = require("fs").promises; // Importar fs.promises para operações assíncronas de arquivo
-const path = require("path"); // Importar path para resolver caminhos de arquivo
+const fs = require("fs").promises;
+const path = require("path");
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
-const ML_CONFIG_FILE = path.join(__dirname, "..", "mlConfig.json"); // Caminho para o arquivo de configuração
+const ML_CONFIG_FILE = path.join(__dirname, "..", "mlConfig.json");
 
-// Funções para ler e escrever a configuração do ML
 const readMlConfig = async () => {
   try {
     const data = await fs.readFile(ML_CONFIG_FILE, "utf8");
     return JSON.parse(data);
   } catch (error) {
     if (error.code === "ENOENT") {
-      // Arquivo não existe, retorna configuração padrão
       return { margemMinima: "", margemMaxima: "", imposto: "", extras: "" };
     }
     console.error("Erro ao ler mlConfig.json:", error);
@@ -34,7 +32,6 @@ const writeMlConfig = async (config) => {
   }
 };
 
-// Recupera tokens do banco
 const getTokensFromDB = async (userId, marketplace) => {
   const client = await pool.connect();
   try {
@@ -48,7 +45,6 @@ const getTokensFromDB = async (userId, marketplace) => {
   }
 };
 
-// Salva tokens no banco
 const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
   const obtainedAt = Date.now();
   const client = await pool.connect();
@@ -73,7 +69,6 @@ router.get("/auth-url", (req, res) => {
   res.json({ authUrl });
 });
 
-// Troca código por token (GET)
 router.get("/exchange-code-get", async (req, res) => {
   const { code } = req.query;
   const userId = "default_user";
@@ -90,14 +85,13 @@ router.get("/exchange-code-get", async (req, res) => {
       redirect_uri: REDIRECT_URI,
     });
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     res.json({ message: "Token stored successfully" });
   } catch (error) {
     res.status(500).json({ message: "Error exchanging code", error: error.message });
   }
 });
 
-// Troca código por token (POST)
 router.post("/exchange-code", async (req, res) => {
   const { code } = req.body;
   const userId = "default_user";
@@ -110,17 +104,17 @@ router.post("/exchange-code", async (req, res) => {
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
-      refresh_token: tokenData.refresh_token,
+      code,
+      redirect_uri: REDIRECT_URI,
     });
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
-    return access_token;
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    res.json({ message: "Token stored successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Error exchanging code", error: error.message });
   }
+});
 
-  return tokenData.access_token;
-};
-
-// Dados do usuário autenticado
 router.get("/user-info", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -136,7 +130,6 @@ router.get("/user-info", async (req, res) => {
   }
 });
 
-// Endpoint para simular custos do Mercado Livre
 router.get("/costs_simulator", async (req, res) => {
   const { price, category_id, listing_type_id, site_id } = req.query;
 
@@ -153,7 +146,6 @@ router.get("/costs_simulator", async (req, res) => {
   }
 });
 
-// Lista de anúncios com estatísticas e SKU
 router.get("/items", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -179,7 +171,6 @@ router.get("/items", async (req, res) => {
         });
         const item = itemResponse.data;
 
-        // Chamar o simulador de custos para cada item
         let totalCostML = 0;
         if (item.price && item.category_id && item.listing_type_id) {
           try {
@@ -190,22 +181,17 @@ router.get("/items", async (req, res) => {
           }
         }
 
-        // Buscar SKU em múltiplas fontes possíveis
         let sku = "—";
-        
-        // 1. Verificar se há variations (produtos com variações podem ter SKU nas variações)
         if (item.variations && item.variations.length > 0) {
           const firstVariation = item.variations[0];
           if (firstVariation.seller_custom_field) {
             sku = firstVariation.seller_custom_field;
           }
         }
-        
-        // 2. Buscar nos attributes do item principal
         if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
-          const skuAttribute = item.attributes.find(attr => 
-            attr.id === "SELLER_SKU" || 
-            attr.id === "SKU" || 
+          const skuAttribute = item.attributes.find(attr =>
+            attr.id === "SELLER_SKU" ||
+            attr.id === "SKU" ||
             attr.name === "SKU" ||
             attr.name === "Código de identificação" ||
             attr.value_id === "SELLER_SKU"
@@ -214,26 +200,23 @@ router.get("/items", async (req, res) => {
             sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
           }
         }
-        
-        // 3. Fallback para seller_custom_field do item principal
         if (sku === "—" && item.seller_custom_field) {
           sku = item.seller_custom_field;
         }
-        
-        // 4. Se ainda não encontrou, usar parte do ID como identificador
         if (sku === "—") {
-          sku = item.id.substring(3, 11); // Pega uma parte do ID que não seja "MLB"
+          sku = item.id.substring(3, 11);
         }
 
-        // Recuperar precoCusto do banco de dados (se existir)
         let precoCustoSalvo = 0;
         const client = await pool.connect();
         try {
           const res = await client.query("SELECT preco_custo FROM product_costs WHERE product_id = $1", [item.id]);
           if (res.rows.length > 0) {
             precoCustoSalvo = parseFloat(res.rows[0].preco_custo);
+            if (isNaN(precoCustoSalvo) || !isFinite(precoCustoSalvo)) {
+              precoCustoSalvo = 0;
+            }
           }
-          console.log(`Backend: precoCusto para ${item.id} lido do DB: ${precoCustoSalvo}`);
         } catch (dbError) {
           console.error(`Erro ao buscar preco_custo para ${item.id}:`, dbError.message);
         } finally {
@@ -247,21 +230,20 @@ router.get("/items", async (req, res) => {
           estoque: item.available_quantity,
           title: item.title,
           precoVenda: item.price,
-          precoCusto: precoCustoSalvo, // Usar o precoCusto salvo ou 0
-          totalCostML: totalCostML, // Adicionar o custo total do ML
-          visitas: 0, // Será atualizado depois
+          precoCusto: precoCustoSalvo,
+          totalCostML: totalCostML,
+          visitas: 0,
           vendas: item.sold_quantity,
           promocao: item.official_store_id !== null,
           permalink: item.permalink,
           status: item.status,
-          category_id: item.category_id, // Adicionar category_id
-          listing_type_id: item.listing_type_id, // Adicionar listing_type_id
-          site_id: item.site_id, // Adicionar site_id
+          category_id: item.category_id,
+          listing_type_id: item.listing_type_id,
+          site_id: item.site_id,
         };
       })
     );
 
-    // Atualizar visitas (mantido para compatibilidade, mas pode ser otimizado)
     const visitStats = await Promise.all(
       itemIds.map(id =>
         axios
@@ -272,7 +254,7 @@ router.get("/items", async (req, res) => {
       )
     );
 
-    const finalFormatted = formatted.map((item, i) => ({
+    const finalFormatted = itemDetails.map((item, i) => ({
       ...item,
       visitas: visitStats[i]?.data?.total_visits || 0,
     }));
@@ -284,7 +266,6 @@ router.get("/items", async (req, res) => {
   }
 });
 
-// Endpoint para salvar o preço de custo de um produto
 router.post("/items/update-cost", async (req, res) => {
   const { id, precoCusto } = req.body;
 
@@ -294,7 +275,6 @@ router.post("/items/update-cost", async (req, res) => {
 
   const client = await pool.connect();
   try {
-    console.log(`Backend: Recebido para salvar precoCusto para ${id}: ${precoCusto}`);
     await client.query(
       `INSERT INTO product_costs (product_id, preco_custo)
        VALUES ($1, $2)
@@ -312,5 +292,3 @@ router.post("/items/update-cost", async (req, res) => {
 });
 
 module.exports = router;
-
-
