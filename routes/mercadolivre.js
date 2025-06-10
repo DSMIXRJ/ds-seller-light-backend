@@ -2,10 +2,37 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 const pool = require("../database.js");
+const fs = require("fs").promises; // Importar fs.promises para operações assíncronas de arquivo
+const path = require("path"); // Importar path para resolver caminhos de arquivo
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
+
+const ML_CONFIG_FILE = path.join(__dirname, "..", "mlConfig.json"); // Caminho para o arquivo de configuração
+
+// Funções para ler e escrever a configuração do ML
+const readMlConfig = async () => {
+  try {
+    const data = await fs.readFile(ML_CONFIG_FILE, "utf8");
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      // Arquivo não existe, retorna configuração padrão
+      return { margemMinima: "", margemMaxima: "", imposto: "", extras: "" };
+    }
+    console.error("Erro ao ler mlConfig.json:", error);
+    return { margemMinima: "", margemMaxima: "", imposto: "", extras: "" };
+  }
+};
+
+const writeMlConfig = async (config) => {
+  try {
+    await fs.writeFile(ML_CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+  } catch (error) {
+    console.error("Erro ao escrever mlConfig.json:", error);
+  }
+};
 
 // Recupera tokens do banco
 const getTokensFromDB = async (userId, marketplace) => {
@@ -55,7 +82,7 @@ router.get("/exchange-code-get", async (req, res) => {
   if (!code) return res.status(400).json({ message: "Authorization code is required" });
 
   try {
-    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+    const response = await axios.post("https://api.mercadolivre.com/oauth/token", {
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
@@ -63,7 +90,7 @@ router.get("/exchange-code-get", async (req, res) => {
       redirect_uri: REDIRECT_URI,
     });
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
     res.json({ message: "Token stored successfully" });
   } catch (error) {
     res.status(500).json({ message: "Error exchanging code", error: error.message });
@@ -79,7 +106,7 @@ router.post("/exchange-code", async (req, res) => {
   if (!code) return res.status(400).json({ message: "Authorization code is required" });
 
   try {
-    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+    const response = await axios.post("https://api.mercadolivre.com/oauth/token", {
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
@@ -87,7 +114,7 @@ router.post("/exchange-code", async (req, res) => {
       redirect_uri: REDIRECT_URI,
     });
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
     res.json({ message: "Token stored successfully" });
   } catch (error) {
     res.status(500).json({ message: "Error exchanging code", error: error.message });
@@ -97,7 +124,7 @@ router.post("/exchange-code", async (req, res) => {
 // Garante token válido
 const getValidAccessToken = async (userId, marketplace) => {
   const tokenData = await getTokensFromDB(userId, marketplace);
-  if (!tokenData) throw new Error("No tokens found. Please authenticate.");
+  if (!tokenData) throw new new Error("No tokens found. Please authenticate.");
   const expirationTime = Number(tokenData.obtained_at) + tokenData.expires_in * 1000;
 
   if (Date.now() >= expirationTime - 5 * 60 * 1000) {
@@ -108,7 +135,7 @@ const getValidAccessToken = async (userId, marketplace) => {
       refresh_token: tokenData.refresh_token,
     });
     const { access_token, refresh_token, expires_in } = response.data;
-    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
     return access_token;
   }
 
@@ -244,8 +271,6 @@ router.get("/items", async (req, res) => {
   }
 });
 
-module.exports = router;
-
 // Endpoint para verificar status de integração do Mercado Livre
 router.get("/status", async (req, res) => {
   const userId = "default_user";
@@ -273,7 +298,7 @@ router.get("/status", async (req, res) => {
         });
         
         const { access_token, refresh_token, expires_in } = response.data;
-        await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+        await saveTokensToDB(userId, marketplace, access_token, refresh_token, expiresIn);
         
         return res.json({ integrated: true, message: "Token refreshed successfully" });
       } catch (refreshError) {
@@ -334,4 +359,29 @@ router.delete("/remove", async (req, res) => {
     res.status(500).json({ success: false, message: "Error removing integration", error: error.message });
   }
 });
+
+// Endpoints para configuração do Mercado Livre
+router.get("/config", async (req, res) => {
+  try {
+    const config = await readMlConfig();
+    res.json(config);
+  } catch (error) {
+    console.error("Erro ao buscar configurações do ML:", error);
+    res.status(500).json({ message: "Erro ao buscar configurações", error: error.message });
+  }
+});
+
+router.post("/config", async (req, res) => {
+  try {
+    const newConfig = req.body;
+    await writeMlConfig(newConfig);
+    res.json({ success: true, message: "Configurações salvas com sucesso" });
+  } catch (error) {
+    console.error("Erro ao salvar configurações do ML:", error);
+    res.status(500).json({ message: "Erro ao salvar configurações", error: error.message });
+  }
+});
+
+module.exports = router;
+
 
