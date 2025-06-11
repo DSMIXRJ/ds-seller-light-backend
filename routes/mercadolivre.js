@@ -90,7 +90,7 @@ router.post("/config", async (req, res) => {
   }
 });
 
-// 🔥 ROTA /status que realmente valida o token no Mercado Livre
+// ROTA /status que realmente valida o token no Mercado Livre
 router.get("/status", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -175,6 +175,7 @@ router.post("/items/update-cost", async (req, res) => {
   }
 });
 
+// ROTA AJUSTADA: Retorna exatamente os campos esperados pelo frontend
 router.get("/items", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -201,14 +202,21 @@ router.get("/items", async (req, res) => {
         const itemRes = await axios.get(`https://api.mercadolibre.com/items/${id}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
+        const item = itemRes.data;
+
         return {
-          id: itemRes.data.id,
-          title: itemRes.data.title,
-          price: itemRes.data.price,
-          sku: itemRes.data.seller_custom_field || "",
-          sold_quantity: itemRes.data.sold_quantity || 0,
-          available_quantity: itemRes.data.available_quantity || 0,
-          visits: 0,
+          id: item.id,
+          image: item.thumbnail || "",
+          sku: item.seller_custom_field || "",
+          estoque: item.available_quantity || 0,
+          title: item.title,
+          precoVenda: item.price || 0,
+          precoCusto: 0,
+          visitas: 0,
+          vendas: item.sold_quantity || 0,
+          promocao: item.official_store_id !== null,
+          permalink: item.permalink,
+          status: item.status
         };
       })
     );
