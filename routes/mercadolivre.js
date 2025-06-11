@@ -64,7 +64,6 @@ const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, ex
   }
 };
 
-// ROTA NOVA: /api/mercadolivre/config
 router.get("/config", async (req, res) => {
   try {
     const config = await readMlConfig();
@@ -75,7 +74,6 @@ router.get("/config", async (req, res) => {
   }
 });
 
-// Endpoint para salvar o preço de custo
 router.post("/items/update-cost", async (req, res) => {
   const { id, precoCusto } = req.body;
 
@@ -101,7 +99,6 @@ router.post("/items/update-cost", async (req, res) => {
   }
 });
 
-// Endpoint para simular custos do Mercado Livre
 router.get("/costs_simulator", async (req, res) => {
   const { price, category_id, listing_type_id, site_id } = req.query;
 
@@ -118,7 +115,6 @@ router.get("/costs_simulator", async (req, res) => {
   }
 });
 
-// Lista de anúncios
 router.get("/items", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -239,5 +235,9 @@ router.get("/items", async (req, res) => {
   }
 });
 
-// EXPORTAÇÃO CORRETA
+// NOVA ROTA /status
+router.get("/status", async (req, res) => {
+  res.json({ status: "ok" });
+});
+
 module.exports = router;
