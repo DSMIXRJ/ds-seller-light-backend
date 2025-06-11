@@ -90,11 +90,32 @@ router.post("/config", async (req, res) => {
   }
 });
 
+// 🔥 ROTA /status que realmente valida o token no Mercado Livre
 router.get("/status", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
-  const token = await getValidAccessToken(userId, marketplace);
-  res.json({ integrated: !!token });
+
+  try {
+    const accessToken = await getValidAccessToken(userId, marketplace);
+
+    if (!accessToken) {
+      return res.json({ integrated: false });
+    }
+
+    // Testa se o token ainda é aceito pela API do ML
+    try {
+      await axios.get("https://api.mercadolibre.com/users/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return res.json({ integrated: true });
+    } catch (err) {
+      console.warn("Token inválido no ML:", err.response?.status || err.message);
+      return res.json({ integrated: false });
+    }
+  } catch (error) {
+    console.error("Erro na verificação de status:", error.message);
+    res.status(500).json({ integrated: false });
+  }
 });
 
 router.delete("/remove", async (req, res) => {
@@ -108,6 +129,47 @@ router.delete("/remove", async (req, res) => {
   } catch (error) {
     console.error("Erro ao remover integração:", error.message);
     res.status(500).json({ success: false, message: "Erro ao remover integração", error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/costs_simulator", async (req, res) => {
+  const { price, category_id, listing_type_id, site_id } = req.query;
+
+  if (!price || !category_id || !listing_type_id || !site_id) {
+    return res.status(400).json({ message: "Parâmetros obrigatórios ausentes para o simulador de custos." });
+  }
+
+  try {
+    const response = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${price}&category_id=${category_id}&listing_type_id=${listing_type_id}&site_id=${site_id}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error("Erro ao chamar o simulador de custos do ML:", error.message);
+    res.status(500).json({ message: "Erro ao simular custos do Mercado Livre", error: error.message });
+  }
+});
+
+router.post("/items/update-cost", async (req, res) => {
+  const { id, precoCusto } = req.body;
+
+  if (!id || precoCusto === undefined) {
+    return res.status(400).json({ message: "ID do produto e preço de custo são obrigatórios." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO product_costs (product_id, preco_custo)
+       VALUES ($1, $2)
+       ON CONFLICT (product_id) DO UPDATE SET
+         preco_custo = EXCLUDED.preco_custo`,
+      [id, precoCusto]
+    );
+    res.json({ success: true, message: "Preço de custo salvo com sucesso." });
+  } catch (error) {
+    console.error(`Erro ao salvar preco_custo para ${id}:`, error.message);
+    res.status(500).json({ success: false, message: "Erro ao salvar preço de custo", error: error.message });
   } finally {
     client.release();
   }
