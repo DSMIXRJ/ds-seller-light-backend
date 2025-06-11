@@ -235,9 +235,30 @@ router.get("/items", async (req, res) => {
   }
 });
 
-// NOVA ROTA /status
+// ROTA /status
 router.get("/status", async (req, res) => {
   res.json({ status: "ok" });
+});
+
+// ROTA /remove — remove tokens do banco (sem afetar ML real)
+router.delete("/remove", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  const client = await pool.connect();
+  try {
+    await client.query(
+      "DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2",
+      [userId, marketplace]
+    );
+    console.log("[BACKEND] Integração removida do DS Seller.");
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao remover integração:", error.message);
+    res.status(500).json({ success: false, message: "Erro ao remover integração", error: error.message });
+  } finally {
+    client.release();
+  }
 });
 
 module.exports = router;
