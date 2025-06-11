@@ -175,7 +175,7 @@ router.post("/items/update-cost", async (req, res) => {
   }
 });
 
-// ROTA AJUSTADA: Retorna exatamente os campos esperados pelo frontend
+// ROTA FINAL: Retorna todos os campos esperados, com busca de SKU e VISITAS correta
 router.get("/items", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
@@ -204,15 +204,49 @@ router.get("/items", async (req, res) => {
         });
         const item = itemRes.data;
 
+        // Busca SKU nas fontes possíveis
+        let sku = "";
+        // 1. Variações
+        if (item.variations && item.variations.length > 0) {
+          const firstVariation = item.variations[0];
+          if (firstVariation.seller_custom_field) sku = firstVariation.seller_custom_field;
+        }
+        // 2. Attributes
+        if (!sku && item.attributes && Array.isArray(item.attributes)) {
+          const skuAttr = item.attributes.find(attr =>
+            attr.id === "SELLER_SKU" ||
+            attr.id === "SKU" ||
+            attr.name === "SKU" ||
+            attr.name === "Código de identificação" ||
+            attr.value_id === "SELLER_SKU"
+          );
+          if (skuAttr) sku = skuAttr.value_name || skuAttr.value_id || (skuAttr.values?.[0]?.name || "");
+        }
+        // 3. seller_custom_field do item principal
+        if (!sku && item.seller_custom_field) sku = item.seller_custom_field;
+        // 4. Fallback para parte do ID
+        if (!sku) sku = item.id.substring(3, 11);
+
+        // Busca visitas reais
+        let visitas = 0;
+        try {
+          const visitasRes = await axios.get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          visitas = visitasRes.data.total_visits || 0;
+        } catch {
+          visitas = 0;
+        }
+
         return {
           id: item.id,
           image: item.thumbnail || "",
-          sku: item.seller_custom_field || "",
+          sku,
           estoque: item.available_quantity || 0,
           title: item.title,
           precoVenda: item.price || 0,
           precoCusto: 0,
-          visitas: 0,
+          visitas,
           vendas: item.sold_quantity || 0,
           promocao: item.official_store_id !== null,
           permalink: item.permalink,
