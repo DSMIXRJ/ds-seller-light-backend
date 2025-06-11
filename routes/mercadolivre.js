@@ -8,8 +8,47 @@ const path = require("path");
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
-
 const ML_CONFIG_FILE = path.join(__dirname, "..", "mlConfig.json");
+
+// Função auxiliar para renovar ou validar token
+async function getValidAccessToken(userId, marketplace) {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      "SELECT access_token, refresh_token, expires_in, obtained_at FROM tokens WHERE user_id = $1 AND marketplace = $2",
+      [userId, marketplace]
+    );
+    if (result.rows.length === 0) return null;
+
+    const { access_token, refresh_token, expires_in, obtained_at } = result.rows[0];
+    const now = Date.now();
+    const expiresAt = obtained_at + expires_in * 1000;
+
+    if (now < expiresAt - 60000) return access_token;
+
+    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+      grant_type: "refresh_token",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      refresh_token,
+    });
+
+    const { access_token: newToken, refresh_token: newRefresh, expires_in: newExpires } = response.data;
+
+    await client.query(
+      `UPDATE tokens SET access_token = $1, refresh_token = $2, expires_in = $3, obtained_at = $4
+       WHERE user_id = $5 AND marketplace = $6`,
+      [newToken, newRefresh, newExpires, now, userId, marketplace]
+    );
+
+    return newToken;
+  } catch (error) {
+    console.error("Erro ao renovar token:", error.message);
+    return null;
+  } finally {
+    client.release();
+  }
+}
 
 const readMlConfig = async () => {
   try {
@@ -32,38 +71,6 @@ const writeMlConfig = async (config) => {
   }
 };
 
-const getTokensFromDB = async (userId, marketplace) => {
-  const client = await pool.connect();
-  try {
-    const res = await client.query(
-      "SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2",
-      [userId, marketplace]
-    );
-    return res.rows[0];
-  } finally {
-    client.release();
-  }
-};
-
-const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
-  const obtainedAt = Date.now();
-  const client = await pool.connect();
-  try {
-    await client.query(
-      `INSERT INTO tokens (user_id, marketplace, access_token, refresh_token, expires_in, obtained_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (user_id, marketplace) DO UPDATE SET
-         access_token = EXCLUDED.access_token,
-         refresh_token = EXCLUDED.refresh_token,
-         expires_in = EXCLUDED.expires_in,
-         obtained_at = EXCLUDED.obtained_at`,
-      [userId, marketplace, accessToken, refreshToken, expiresIn, obtainedAt]
-    );
-  } finally {
-    client.release();
-  }
-};
-
 router.get("/config", async (req, res) => {
   try {
     const config = await readMlConfig();
@@ -74,183 +81,28 @@ router.get("/config", async (req, res) => {
   }
 });
 
-router.post("/items/update-cost", async (req, res) => {
-  const { id, precoCusto } = req.body;
-
-  if (!id || precoCusto === undefined) {
-    return res.status(400).json({ message: "ID do produto e preço de custo são obrigatórios." });
-  }
-
-  const client = await pool.connect();
+router.post("/config", async (req, res) => {
   try {
-    await client.query(
-      `INSERT INTO product_costs (product_id, preco_custo)
-       VALUES ($1, $2)
-       ON CONFLICT (product_id) DO UPDATE SET
-         preco_custo = EXCLUDED.preco_custo`,
-      [id, precoCusto]
-    );
-    res.json({ success: true, message: "Preço de custo salvo com sucesso." });
+    await writeMlConfig(req.body);
+    res.json({ success: true });
   } catch (error) {
-    console.error(`Erro ao salvar preco_custo para ${id}:`, error.message);
-    res.status(500).json({ success: false, message: "Erro ao salvar preço de custo", error: error.message });
-  } finally {
-    client.release();
+    res.status(500).json({ success: false, message: "Erro ao salvar configuração" });
   }
 });
 
-router.get("/costs_simulator", async (req, res) => {
-  const { price, category_id, listing_type_id, site_id } = req.query;
-
-  if (!price || !category_id || !listing_type_id || !site_id) {
-    return res.status(400).json({ message: "Parâmetros obrigatórios ausentes para o simulador de custos." });
-  }
-
-  try {
-    const response = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${price}&category_id=${category_id}&listing_type_id=${listing_type_id}&site_id=${site_id}`);
-    res.json(response.data);
-  } catch (error) {
-    console.error("Erro ao chamar o simulador de custos do ML:", error.message);
-    res.status(500).json({ message: "Erro ao simular custos do Mercado Livre", error: error.message });
-  }
-});
-
-router.get("/items", async (req, res) => {
+router.get("/status", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
-
-  try {
-    const accessToken = await getValidAccessToken(userId, marketplace);
-    const userInfo = await axios.get("https://api.mercadolivre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    const sellerId = userInfo.data.id;
-    const itemList = await axios.get(`https://api.mercadolivre.com/users/${sellerId}/items/search`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { limit: 50, offset: 0 },
-    });
-
-    const itemIds = itemList.data.results;
-
-    const itemDetails = await Promise.all(
-      itemIds.map(async (id) => {
-        const itemResponse = await axios.get(`https://api.mercadolivre.com/items/${id}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const item = itemResponse.data;
-
-        let totalCostML = 0;
-        if (item.price && item.category_id && item.listing_type_id) {
-          try {
-            const simulatorResponse = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${item.price}&category_id=${item.category_id}&listing_type_id=${item.listing_type_id}&site_id=${item.site_id}`);
-            totalCostML = simulatorResponse.data.total_cost;
-          } catch (simError) {
-            console.warn(`Erro ao simular custos para o item ${id}:`, simError.message);
-          }
-        }
-
-        let sku = "—";
-        if (item.variations && item.variations.length > 0) {
-          const firstVariation = item.variations[0];
-          if (firstVariation.seller_custom_field) {
-            sku = firstVariation.seller_custom_field;
-          }
-        }
-        if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
-          const skuAttribute = item.attributes.find(attr =>
-            attr.id === "SELLER_SKU" ||
-            attr.id === "SKU" ||
-            attr.name === "SKU" ||
-            attr.name === "Código de identificação" ||
-            attr.value_id === "SELLER_SKU"
-          );
-          if (skuAttribute) {
-            sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
-          }
-        }
-        if (sku === "—" && item.seller_custom_field) {
-          sku = item.seller_custom_field;
-        }
-        if (sku === "—") {
-          sku = item.id.substring(3, 11);
-        }
-
-        let precoCustoSalvo = 0;
-        const client = await pool.connect();
-        try {
-          const res = await client.query("SELECT preco_custo FROM product_costs WHERE product_id = $1", [item.id]);
-          if (res.rows.length > 0) {
-            precoCustoSalvo = parseFloat(res.rows[0].preco_custo);
-            if (isNaN(precoCustoSalvo) || !isFinite(precoCustoSalvo)) {
-              precoCustoSalvo = 0;
-            }
-          }
-        } catch (dbError) {
-          console.error(`Erro ao buscar preco_custo para ${item.id}:`, dbError.message);
-        } finally {
-          client.release();
-        }
-
-        return {
-          id: item.id,
-          sku: sku,
-          image: item.thumbnail,
-          estoque: item.available_quantity,
-          title: item.title,
-          precoVenda: item.price,
-          precoCusto: precoCustoSalvo,
-          totalCostML: totalCostML,
-          visitas: 0,
-          vendas: item.sold_quantity,
-          promocao: item.official_store_id !== null,
-          permalink: item.permalink,
-          status: item.status,
-          category_id: item.category_id,
-          listing_type_id: item.listing_type_id,
-          site_id: item.site_id,
-        };
-      })
-    );
-
-    const visitStats = await Promise.all(
-      itemIds.map(id =>
-        axios
-          .get(`https://api.mercadolivre.com/items/${id}/visits/time_window?last=30&unit=day`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          })
-          .catch(() => ({ data: { total_visits: 0 } }))
-      )
-    );
-
-    const finalFormatted = itemDetails.map((item, i) => ({
-      ...item,
-      visitas: visitStats[i]?.data?.total_visits || 0,
-    }));
-
-    res.json(finalFormatted);
-  } catch (error) {
-    console.error("Erro ao buscar anúncios:", error.message);
-    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
-  }
+  const token = await getValidAccessToken(userId, marketplace);
+  res.json({ integrated: !!token });
 });
 
-// ROTA /status
-router.get("/status", async (req, res) => {
-  res.json({ status: "ok" });
-});
-
-// ROTA /remove — remove tokens do banco (sem afetar ML real)
 router.delete("/remove", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
-
   const client = await pool.connect();
   try {
-    await client.query(
-      "DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2",
-      [userId, marketplace]
-    );
+    await client.query("DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2", [userId, marketplace]);
     console.log("[BACKEND] Integração removida do DS Seller.");
     res.json({ success: true });
   } catch (error) {
@@ -258,6 +110,51 @@ router.delete("/remove", async (req, res) => {
     res.status(500).json({ success: false, message: "Erro ao remover integração", error: error.message });
   } finally {
     client.release();
+  }
+});
+
+router.get("/items", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+  const accessToken = await getValidAccessToken(userId, marketplace);
+
+  if (!accessToken) {
+    return res.status(401).json({ message: "Token inválido ou expirado." });
+  }
+
+  try {
+    const response = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const sellerId = response.data.id;
+
+    const itemsResponse = await axios.get(
+      `https://api.mercadolibre.com/users/${sellerId}/items/search?search_type=scan`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    const items = itemsResponse.data.results.slice(0, 50);
+    const itemsDetails = await Promise.all(
+      items.map(async (id) => {
+        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${id}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        return {
+          id: itemRes.data.id,
+          title: itemRes.data.title,
+          price: itemRes.data.price,
+          sku: itemRes.data.seller_custom_field || "",
+          sold_quantity: itemRes.data.sold_quantity || 0,
+          available_quantity: itemRes.data.available_quantity || 0,
+          visits: 0,
+        };
+      })
+    );
+
+    res.json(itemsDetails);
+  } catch (error) {
+    console.error("Erro ao buscar anúncios:", error.message);
+    res.status(500).json({ message: "Erro ao buscar anúncios" });
   }
 });
 
