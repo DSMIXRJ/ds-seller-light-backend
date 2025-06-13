@@ -33,6 +33,16 @@ app.use("/api/mercadolivre", mercadoLivreRoutes);
 app.use("/api/accounts", accountsRoutes);
 app.use("/api/mercadolivre", configRoutes);
 
+// 🔁 Redireciona /auth/callback para /api/mercadolivre/exchange-code-get
+app.get("/auth/callback", (req, res) => {
+  const { code } = req.query;
+  if (!code) {
+    return res.status(400).send("Code de autorização ausente.");
+  }
+  res.redirect(`/api/mercadolivre/exchange-code-get?code=${code}`);
+});
+
+// Teste API
 app.get("/", (req, res) => {
   console.log("[INDEX_LOG] Root path / was accessed.");
   res.send("DS Seller Backend with PostgreSQL is running! Check logs for DB status.");
@@ -47,3 +57,4 @@ app.listen(port, () => {
   console.log("[INDEX_LOG] PostgreSQL connection attempt is handled by database.js on load.");
   console.log("[INDEX_LOG] Check earlier logs for [DB_LOG] messages from database.js.");
 });
+
