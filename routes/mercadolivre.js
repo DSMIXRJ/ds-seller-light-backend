@@ -66,8 +66,8 @@ router.get("/exchange-code-get", async (req, res) => {
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
 
-    // Redireciona de volta ao frontend
-    res.redirect("https://dsseller.com.br/dashboard");
+    // Corrigido: redireciona com o código para o frontend
+    res.redirect(`https://dsseller.com.br/auth/callback?code=${code}`);
   } catch (error) {
     res.status(500).json({ message: "Error exchanging code", error: error.message });
   }
