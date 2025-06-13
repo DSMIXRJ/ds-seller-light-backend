@@ -5,14 +5,13 @@ const pool = require("../database.js");
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
-const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
+const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller-backend-final.onrender.com/api/mercadolivre/auth/callback";
 
 router.get("/auth-url", (req, res) => {
   const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
   res.json({ authUrl });
 });
 
-// Rota de callback para concluir a autenticação
 router.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   if (!code) return res.status(400).json({ message: "Authorization code is required" });
