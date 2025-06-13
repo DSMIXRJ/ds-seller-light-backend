@@ -7,7 +7,7 @@ const CLIENT_ID     = process.env.ML_CLIENT_ID     || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI  = process.env.ML_REDIRECT_URI  || "https://dsseller.com.br/auth/callback";
 
-// ── helpers ───────────────────────────────────────────────────────────────
+// ── salva tokens ──────────────────────────────────────────────────────────
 const saveTokens = async (access, refresh, exp) => {
   const c = await pool.connect();
   try {
@@ -44,7 +44,9 @@ router.get("/exchange-code-get", async (req, res) => {
     });
 
     await saveTokens(data.access_token, data.refresh_token, data.expires_in);
-    res.json({ success: true }); // nada de redirect aqui
+
+    // redireciona de volta pro app já marcando integrado
+    res.redirect("https://dsseller.com.br/integracoes?ml_integrado=1");
   } catch (err) {
     res.status(500).json({ message: "Error exchanging code", error: err.message });
   }
