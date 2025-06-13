@@ -7,27 +7,26 @@ const CLIENT_ID     = process.env.ML_CLIENT_ID     || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI  = process.env.ML_REDIRECT_URI  || "https://dsseller.com.br/auth/callback";
 
-// ─── util ──────────────────────────────────────────────────────────────────
-const saveTokensToDB = async (userId, marketplace, access, refresh, exp) => {
-  const obtained = Date.now();
+// ── helpers ───────────────────────────────────────────────────────────────
+const saveTokens = async (access, refresh, exp) => {
   const c = await pool.connect();
   try {
     await c.query(
       `INSERT INTO tokens (user_id, marketplace, access_token, refresh_token, expires_in, obtained_at)
-       VALUES ($1,$2,$3,$4,$5,$6)
+       VALUES ('default_user','mercadolivre',$1,$2,$3,$4)
        ON CONFLICT (user_id, marketplace) DO UPDATE
-       SET access_token=$3, refresh_token=$4, expires_in=$5, obtained_at=$6`,
-      [userId, marketplace, access, refresh, exp, obtained]
+       SET access_token=$1, refresh_token=$2, expires_in=$3, obtained_at=$4`,
+      [access, refresh, exp, Date.now()]
     );
   } finally { c.release(); }
 };
 
-// ─── endpoints ────────────────────────────────────────────────────────────
+// ── endpoints ─────────────────────────────────────────────────────────────
 router.get("/auth-url", (_req, res) => {
   res.json({
     authUrl:
-      `https://auth.mercadolivre.com.br/authorization` +
-      `?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`,
+      `https://auth.mercadolivre.com.br/authorization?response_type=code` +
+      `&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`,
   });
 });
 
@@ -44,12 +43,36 @@ router.get("/exchange-code-get", async (req, res) => {
       redirect_uri : REDIRECT_URI,
     });
 
-    await saveTokensToDB("default_user", "mercadolivre", data.access_token, data.refresh_token, data.expires_in);
-
-    // volta para o app já logado
-    res.redirect("https://dsseller.com.br/auth/callback?success=1");
+    await saveTokens(data.access_token, data.refresh_token, data.expires_in);
+    res.json({ success: true }); // nada de redirect aqui
   } catch (err) {
     res.status(500).json({ message: "Error exchanging code", error: err.message });
+  }
+});
+
+router.get("/status", async (_req, res) => {
+  try {
+    const c = await pool.connect();
+    const r = await c.query(
+      "SELECT 1 FROM tokens WHERE user_id='default_user' AND marketplace='mercadolivre' LIMIT 1"
+    );
+    c.release();
+    res.json({ status: r.rowCount ? "ok" : "not_connected" });
+  } catch (err) {
+    res.status(500).json({ status: "error", error: err.message });
+  }
+});
+
+router.delete("/remove", async (_req, res) => {
+  try {
+    const c = await pool.connect();
+    await c.query(
+      "DELETE FROM tokens WHERE user_id='default_user' AND marketplace='mercadolivre'"
+    );
+    c.release();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
