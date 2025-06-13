@@ -2,264 +2,584 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 const pool = require("../database.js");
-const fs = require("fs").promises;
-const path = require("path");
 
 const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
-const ML_CONFIG_FILE = path.join(__dirname, "..", "mlConfig.json");
 
-// Função auxiliar para renovar ou validar token
-async function getValidAccessToken(userId, marketplace) {
+// Recupera tokens do banco (compatibilidade)
+const getTokensFromDB = async (userId, marketplace) => {
   const client = await pool.connect();
   try {
-    const result = await client.query(
-      "SELECT access_token, refresh_token, expires_in, obtained_at FROM tokens WHERE user_id = $1 AND marketplace = $2",
+    const res = await client.query(
+      "SELECT access_token, refresh_token, obtained_at, expires_in FROM tokens WHERE user_id = $1 AND marketplace = $2",
       [userId, marketplace]
     );
-    if (result.rows.length === 0) return null;
+    return res.rows[0];
+  } finally {
+    client.release();
+  }
+};
 
-    const { access_token, refresh_token, expires_in, obtained_at } = result.rows[0];
-    const now = Date.now();
-    const expiresAt = obtained_at + expires_in * 1000;
+// Recupera tokens da tabela accounts
+const getAccountTokensFromDB = async (userId, marketplace, accountId = null) => {
+  const client = await pool.connect();
+  try {
+    let query, params;
+    
+    if (accountId) {
+      // Buscar por ID específico
+      query = "SELECT id, access_token, refresh_token, obtained_at, expires_in FROM accounts WHERE id = $1 AND user_id = $2";
+      params = [accountId, userId];
+    } else {
+      // Buscar a primeira conta do marketplace (compatibilidade)
+      query = "SELECT id, access_token, refresh_token, obtained_at, expires_in FROM accounts WHERE user_id = $1 AND marketplace = $2 ORDER BY id LIMIT 1";
+      params = [userId, marketplace];
+    }
+    
+    const res = await client.query(query, params);
+    return res.rows[0];
+  } finally {
+    client.release();
+  }
+};
 
-    if (now < expiresAt - 60000) return access_token;
+// Salva tokens no banco (compatibilidade)
+const saveTokensToDB = async (userId, marketplace, accessToken, refreshToken, expiresIn) => {
+  const obtainedAt = Date.now();
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO tokens (user_id, marketplace, access_token, refresh_token, expires_in, obtained_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id, marketplace) DO UPDATE SET
+         access_token = EXCLUDED.access_token,
+         refresh_token = EXCLUDED.refresh_token,
+         expires_in = EXCLUDED.expires_in,
+         obtained_at = EXCLUDED.obtained_at`,
+      [userId, marketplace, accessToken, refreshToken, expiresIn, obtainedAt]
+    );
+  } finally {
+    client.release();
+  }
+};
 
+// Salva tokens na tabela accounts
+const saveAccountTokensToDB = async (userId, marketplace, accountId, accessToken, refreshToken, expiresIn, accountName = null) => {
+  const obtainedAt = Date.now();
+  const client = await pool.connect();
+  try {
+    // Verificar se a conta já existe
+    const existingAccount = await client.query(
+      "SELECT id FROM accounts WHERE user_id = $1 AND marketplace = $2 AND account_id = $3",
+      [userId, marketplace, accountId]
+    );
+    
+    if (existingAccount.rows.length > 0) {
+      // Atualizar conta existente
+      await client.query(
+        `UPDATE accounts 
+         SET access_token = $1, refresh_token = $2, expires_in = $3, obtained_at = $4
+         WHERE user_id = $5 AND marketplace = $6 AND account_id = $7
+         RETURNING id`,
+        [accessToken, refreshToken, expiresIn, obtainedAt, userId, marketplace, accountId]
+      );
+      return existingAccount.rows[0].id;
+    } else {
+      // Criar nova conta
+      const name = accountName || `Mercado Livre ${accountId}`;
+      const result = await client.query(
+        `INSERT INTO accounts (user_id, marketplace, account_name, account_id, access_token, refresh_token, expires_in, obtained_at, config)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id`,
+        [userId, marketplace, name, accountId, accessToken, refreshToken, expiresIn, obtainedAt, "{}"]
+      );
+      return result.rows[0].id;
+    }
+  } finally {
+    client.release();
+  }
+};
+
+router.get("/auth-url", (req, res) => {
+  const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
+  res.json({ authUrl });
+});
+
+// Troca código por token (GET)
+router.get("/exchange-code-get", async (req, res) => {
+  const { code } = req.query;
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  if (!code) return res.status(400).json({ message: "Authorization code is required" });
+
+  try {
+    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+      grant_type: "authorization_code",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code,
+      redirect_uri: REDIRECT_URI,
+    });
+    const { access_token, refresh_token, expires_in } = response.data;
+    
+    // Salvar na tabela tokens (compatibilidade)
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    
+    // Obter informações do usuário para usar como nome da conta
+    let accountName = "Mercado Livre";
+    let accountId = "default";
+    
+    try {
+      const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+      
+      if (userResponse.data && userResponse.data.nickname) {
+        accountName = `ML: ${userResponse.data.nickname}`;
+        accountId = userResponse.data.id.toString();
+      }
+    } catch (userError) {
+      console.error("Erro ao obter informações do usuário:", userError);
+      // Continuar com os valores padrão
+    }
+    
+    // Salvar na tabela accounts
+    const dbAccountId = await saveAccountTokensToDB(
+      userId, 
+      marketplace, 
+      accountId, 
+      access_token, 
+      refresh_token, 
+      expires_in, 
+      accountName
+    );
+    
+    res.json({ message: "Token stored successfully", account_id: dbAccountId });
+  } catch (error) {
+    res.status(500).json({ message: "Error exchanging code", error: error.message });
+  }
+});
+
+// Troca código por token (POST)
+router.post("/exchange-code", async (req, res) => {
+  const { code } = req.body;
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  if (!code) return res.status(400).json({ message: "Authorization code is required" });
+
+  try {
+    const response = await axios.post("https://api.mercadolivre.com/oauth/token", {
+      grant_type: "authorization_code",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code,
+      redirect_uri: REDIRECT_URI,
+    });
+    const { access_token, refresh_token, expires_in } = response.data;
+    
+    // Salvar na tabela tokens (compatibilidade)
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    
+    // Obter informações do usuário para usar como nome da conta
+    let accountName = "Mercado Livre";
+    let accountId = "default";
+    
+    try {
+      const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+      
+      if (userResponse.data && userResponse.data.nickname) {
+        accountName = `ML: ${userResponse.data.nickname}`;
+        accountId = userResponse.data.id.toString();
+      }
+    } catch (userError) {
+      console.error("Erro ao obter informações do usuário:", userError);
+      // Continuar com os valores padrão
+    }
+    
+    // Salvar na tabela accounts
+    const dbAccountId = await saveAccountTokensToDB(
+      userId, 
+      marketplace, 
+      accountId, 
+      access_token, 
+      refresh_token, 
+      expires_in, 
+      accountName
+    );
+    
+    res.json({ message: "Token stored successfully", account_id: dbAccountId });
+  } catch (error) {
+    res.status(500).json({ message: "Error exchanging code", error: error.message });
+  }
+});
+
+// Garante token válido (compatibilidade)
+const getValidAccessToken = async (userId, marketplace) => {
+  const tokenData = await getTokensFromDB(userId, marketplace);
+  if (!tokenData) throw new Error("No tokens found. Please authenticate.");
+  const expirationTime = Number(tokenData.obtained_at) + tokenData.expires_in * 1000;
+
+  if (Date.now() >= expirationTime - 5 * 60 * 1000) {
     const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
       grant_type: "refresh_token",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
-      refresh_token,
+      refresh_token: tokenData.refresh_token,
     });
-
-    const { access_token: newToken, refresh_token: newRefresh, expires_in: newExpires } = response.data;
-
-    await client.query(
-      `UPDATE tokens SET access_token = $1, refresh_token = $2, expires_in = $3, obtained_at = $4
-       WHERE user_id = $5 AND marketplace = $6`,
-      [newToken, newRefresh, newExpires, now, userId, marketplace]
-    );
-
-    return newToken;
-  } catch (error) {
-    console.error("Erro ao renovar token:", error.message);
-    return null;
-  } finally {
-    client.release();
+    const { access_token, refresh_token, expires_in } = response.data;
+    await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
+    return access_token;
   }
-}
 
-const readMlConfig = async () => {
-  try {
-    const data = await fs.readFile(ML_CONFIG_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return { margemMinima: "", margemMaxima: "", imposto: "", extras: "" };
+  return tokenData.access_token;
+};
+
+// Garante token válido para conta específica
+const getValidAccountAccessToken = async (userId, marketplace, accountId = null) => {
+  console.log(`[ML_DEBUG] getValidAccountAccessToken called for userId: ${userId}, marketplace: ${marketplace}, accountId: ${accountId}`);
+  const tokenData = await getAccountTokensFromDB(userId, marketplace, accountId);
+  if (!tokenData) {
+    console.error(`[ML_DEBUG] No token data found for userId: ${userId}, marketplace: ${marketplace}, accountId: ${accountId}`);
+    throw new Error("No tokens found. Please authenticate.");
+  }
+  
+  const obtainedAt = Number(tokenData.obtained_at);
+  const expiresIn = tokenData.expires_in;
+  const expirationTime = obtainedAt + expiresIn * 1000;
+  const now = Date.now();
+
+  console.log(`[ML_DEBUG] Token obtained at: ${new Date(obtainedAt).toISOString()}, Expires in: ${expiresIn}s, Expiration Time: ${new Date(expirationTime).toISOString()}, Current Time: ${new Date(now).toISOString()}`);
+
+  if (now >= expirationTime - 5 * 60 * 1000) { // Refresh if less than 5 minutes to expire
+    console.log(`[ML_DEBUG] Token is expired or near expiration. Attempting to refresh...`);
+    try {
+      const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
+        grant_type: "refresh_token",
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        refresh_token: tokenData.refresh_token,
+      });
+      const { access_token, refresh_token, expires_in } = response.data;
+      
+      console.log(`[ML_DEBUG] Token refreshed successfully. New expires_in: ${expires_in}s`);
+
+      // Atualizar na tabela accounts
+      const client = await pool.connect();
+      try {
+        await client.query(
+          `UPDATE accounts 
+           SET access_token = $1, refresh_token = $2, expires_in = $3, obtained_at = $4
+           WHERE id = $5`,
+          [access_token, refresh_token, expires_in, Date.now(), tokenData.id]
+        );
+        console.log(`[ML_DEBUG] Account token updated in DB for ID: ${tokenData.id}`);
+      } finally {
+        client.release();
+      }
+      
+      return access_token;
+    } catch (refreshError) {
+      console.error(`[ML_DEBUG] Error refreshing token: ${refreshError.message}`);
+      if (refreshError.response) {
+        console.error(`[ML_DEBUG] Refresh error response data:`, refreshError.response.data);
+        console.error(`[ML_DEBUG] Refresh error response status:`, refreshError.response.status);
+      }
+      throw new Error("Failed to refresh token. Please re-authenticate.");
     }
-    console.error("Erro ao ler mlConfig.json:", error);
-    return { margemMinima: "", margemMaxima: "", imposto: "", extras: "" };
   }
+
+  console.log(`[ML_DEBUG] Token is still valid. Returning current access token.`);
+  return tokenData.access_token;
 };
 
-const writeMlConfig = async (config) => {
-  try {
-    await fs.writeFile(ML_CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
-  } catch (error) {
-    console.error("Erro ao escrever mlConfig.json:", error);
-  }
-};
-
-router.get("/config", async (req, res) => {
-  try {
-    const config = await readMlConfig();
-    res.json(config);
-  } catch (error) {
-    console.error("Erro ao ler configuração ML:", error.message);
-    res.status(500).json({ message: "Erro ao carregar configuração do Mercado Livre", error: error.message });
-  }
-});
-
-router.post("/config", async (req, res) => {
-  try {
-    await writeMlConfig(req.body);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Erro ao salvar configuração" });
-  }
-});
-
-// ROTA /status que realmente valida o token no Mercado Livre
-router.get("/status", async (req, res) => {
+// Dados do usuário autenticado (compatibilidade)
+router.get("/user-info", async (req, res) => {
   const userId = "default_user";
   const marketplace = "mercadolivre";
 
   try {
     const accessToken = await getValidAccessToken(userId, marketplace);
-
-    if (!accessToken) {
-      return res.json({ integrated: false });
-    }
-
-    // Testa se o token ainda é aceito pela API do ML
-    try {
-      await axios.get("https://api.mercadolibre.com/users/me", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      return res.json({ integrated: true });
-    } catch (err) {
-      console.warn("Token inválido no ML:", err.response?.status || err.message);
-      return res.json({ integrated: false });
-    }
-  } catch (error) {
-    console.error("Erro na verificação de status:", error.message);
-    res.status(500).json({ integrated: false });
-  }
-});
-
-router.delete("/remove", async (req, res) => {
-  const userId = "default_user";
-  const marketplace = "mercadolivre";
-  const client = await pool.connect();
-  try {
-    await client.query("DELETE FROM tokens WHERE user_id = $1 AND marketplace = $2", [userId, marketplace]);
-    console.log("[BACKEND] Integração removida do DS Seller.");
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Erro ao remover integração:", error.message);
-    res.status(500).json({ success: false, message: "Erro ao remover integração", error: error.message });
-  } finally {
-    client.release();
-  }
-});
-
-router.get("/costs_simulator", async (req, res) => {
-  const { price, category_id, listing_type_id, site_id } = req.query;
-
-  if (!price || !category_id || !listing_type_id || !site_id) {
-    return res.status(400).json({ message: "Parâmetros obrigatórios ausentes para o simulador de custos." });
-  }
-
-  try {
-    const response = await axios.get(`https://api.mercadolivre.com/costs_simulator?price=${price}&category_id=${category_id}&listing_type_id=${listing_type_id}&site_id=${site_id}`);
-    res.json(response.data);
-  } catch (error) {
-    console.error("Erro ao chamar o simulador de custos do ML:", error.message);
-    res.status(500).json({ message: "Erro ao simular custos do Mercado Livre", error: error.message });
-  }
-});
-
-router.post("/items/update-cost", async (req, res) => {
-  const { id, precoCusto } = req.body;
-
-  if (!id || precoCusto === undefined) {
-    return res.status(400).json({ message: "ID do produto e preço de custo são obrigatórios." });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query(
-      `INSERT INTO product_costs (product_id, preco_custo)
-       VALUES ($1, $2)
-       ON CONFLICT (product_id) DO UPDATE SET
-         preco_custo = EXCLUDED.preco_custo`,
-      [id, precoCusto]
-    );
-    res.json({ success: true, message: "Preço de custo salvo com sucesso." });
-  } catch (error) {
-    console.error(`Erro ao salvar preco_custo para ${id}:`, error.message);
-    res.status(500).json({ success: false, message: "Erro ao salvar preço de custo", error: error.message });
-  } finally {
-    client.release();
-  }
-});
-
-// ROTA FINAL: Retorna todos os campos esperados, com busca de SKU e VISITAS correta
-router.get("/items", async (req, res) => {
-  const userId = "default_user";
-  const marketplace = "mercadolivre";
-  const accessToken = await getValidAccessToken(userId, marketplace);
-
-  if (!accessToken) {
-    return res.status(401).json({ message: "Token inválido ou expirado." });
-  }
-
-  try {
     const response = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    const sellerId = response.data.id;
-
-    const itemsResponse = await axios.get(
-      `https://api.mercadolibre.com/users/${sellerId}/items/search?search_type=scan`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-
-    const items = itemsResponse.data.results.slice(0, 50);
-    const itemsDetails = await Promise.all(
-      items.map(async (id) => {
-        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${id}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const item = itemRes.data;
-
-        // Busca SKU nas fontes possíveis
-        let sku = "";
-        // 1. Variações
-        if (item.variations && item.variations.length > 0) {
-          const firstVariation = item.variations[0];
-          if (firstVariation.seller_custom_field) sku = firstVariation.seller_custom_field;
-        }
-        // 2. Attributes
-        if (!sku && item.attributes && Array.isArray(item.attributes)) {
-          const skuAttr = item.attributes.find(attr =>
-            attr.id === "SELLER_SKU" ||
-            attr.id === "SKU" ||
-            attr.name === "SKU" ||
-            attr.name === "Código de identificação" ||
-            attr.value_id === "SELLER_SKU"
-          );
-          if (skuAttr) sku = skuAttr.value_name || skuAttr.value_id || (skuAttr.values?.[0]?.name || "");
-        }
-        // 3. seller_custom_field do item principal
-        if (!sku && item.seller_custom_field) sku = item.seller_custom_field;
-        // 4. Fallback para parte do ID
-        if (!sku) sku = item.id.substring(3, 11);
-
-        // Busca visitas reais
-        let visitas = 0;
-        try {
-          const visitasRes = await axios.get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          visitas = visitasRes.data.total_visits || 0;
-        } catch {
-          visitas = 0;
-        }
-
-        return {
-          id: item.id,
-          image: item.thumbnail || "",
-          sku,
-          estoque: item.available_quantity || 0,
-          title: item.title,
-          precoVenda: item.price || 0,
-          precoCusto: 0,
-          visitas,
-          vendas: item.sold_quantity || 0,
-          promocao: item.official_store_id !== null,
-          permalink: item.permalink,
-          status: item.status
-        };
-      })
-    );
-
-    res.json(itemsDetails);
+    res.json(response.data);
   } catch (error) {
-    console.error("Erro ao buscar anúncios:", error.message);
-    res.status(500).json({ message: "Erro ao buscar anúncios" });
+    console.error(`[ML_ERROR] Error in /user-info (compatibility): ${error.message}`);
+    res.status(500).json({ message: "Error fetching user info", error: error.message });
+  }
+});
+
+// Dados do usuário autenticado para conta específica
+router.get("/:accountId/user-info", async (req, res) => {
+  const userId = "default_user";
+  const { accountId } = req.params;
+
+  try {
+    const accessToken = await getValidAccountAccessToken(userId, "mercadolivre", accountId);
+    const response = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error(`[ML_ERROR] Error in /:accountId/user-info: ${error.message}`);
+    res.status(500).json({ message: "Error fetching user info", error: error.message });
+  }
+});
+
+// Lista de anúncios com estatísticas e SKU (compatibilidade)
+router.get("/items", async (req, res) => {
+  const userId = "default_user";
+  const marketplace = "mercadolivre";
+
+  try {
+    const accessToken = await getValidAccessToken(userId, marketplace);
+    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const sellerId = userInfo.data.id;
+    const itemList = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 50, offset: 0 },
+    });
+
+    const itemIds = itemList.data.results;
+
+    const itemDetails = await Promise.all(
+      itemIds.map(id =>
+        axios.get(`https://api.mercadolibre.com/items/${id}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+      )
+    );
+
+    // Debug: Log da estrutura do primeiro item para investigar campos SKU
+    if (itemDetails.length > 0) {
+      console.log("=== DEBUG: Estrutura do item ===");
+      console.log("Item completo:", JSON.stringify(itemDetails[0].data, null, 2));
+      console.log("Attributes:", itemDetails[0].data.attributes);
+      console.log("Seller custom field:", itemDetails[0].data.seller_custom_field);
+      console.log("================================");
+    }
+
+    const visitStats = await Promise.all(
+      itemIds.map(id =>
+        axios
+          .get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          })
+          .catch(() => ({ data: { total_visits: 0 } }))
+      )
+    );
+
+    const formatted = itemDetails.map((res, i) => {
+      const item = res.data;
+      const precoVenda = item.price;
+      const precoCusto = precoVenda * 0.6;
+      const margem = precoVenda - precoCusto;
+
+      // Buscar SKU em múltiplas fontes possíveis
+      let sku = "—";
+      
+      // 1. Verificar se há variations (produtos com variações podem ter SKU nas variações)
+      if (item.variations && item.variations.length > 0) {
+        const firstVariation = item.variations[0];
+        if (firstVariation.seller_custom_field) {
+          sku = firstVariation.seller_custom_field;
+        }
+      }
+      
+      // 2. Buscar nos attributes do item principal
+      if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
+        const skuAttribute = item.attributes.find(attr => 
+          attr.id === "SELLER_SKU" || 
+          attr.id === "SKU" || 
+          attr.name === "SKU" ||
+          attr.name === "Código de identificação" ||
+          attr.value_id === "SELLER_SKU"
+        );
+        if (skuAttribute) {
+          sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
+        }
+      }
+      
+      // 3. Fallback para seller_custom_field do item principal
+      if (sku === "—" && item.seller_custom_field) {
+        sku = item.seller_custom_field;
+      }
+      
+      // 4. Se ainda não encontrou, usar parte do ID como identificador
+      if (sku === "—") {
+        sku = item.id.substring(3, 11); // Pega uma parte do ID que não seja "MLB"
+      }
+
+      return {
+        id: item.id,
+        sku: sku,
+        image: item.thumbnail,
+        estoque: item.available_quantity,
+        title: item.title,
+        precoVenda,
+        precoCusto,
+        margemPercentual: Math.round((margem / precoCusto) * 100),
+        margemReais: margem.toFixed(2),
+        lucroTotal: (margem * item.sold_quantity).toFixed(2),
+        visitas: visitStats[i]?.data?.total_visits || 0,
+        vendas: item.sold_quantity,
+        promocao: item.official_store_id !== null,
+        permalink: item.permalink,
+        status: item.status,
+      };
+    });
+
+    res.json(formatted);
+  } catch (error) {
+    console.error(`[ML_ERROR] Error in /items (compatibility): ${error.message}`);
+    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
+  }
+});
+
+// Lista de anúncios com estatísticas e SKU para conta específica
+router.get("/:accountId/items", async (req, res) => {
+  const userId = "default_user";
+  const { accountId } = req.params;
+
+  try {
+    const accessToken = await getValidAccountAccessToken(userId, "mercadolivre", accountId);
+    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const sellerId = userInfo.data.id;
+    const itemList = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 50, offset: 0 },
+    });
+
+    const itemIds = itemList.data.results;
+
+    const itemDetails = await Promise.all(
+      itemIds.map(id =>
+        axios.get(`https://api.mercadolibre.com/items/${id}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+      )
+    );
+
+    const visitStats = await Promise.all(
+      itemIds.map(id =>
+        axios
+          .get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          })
+          .catch(() => ({ data: { total_visits: 0 } }))
+      )
+    );
+
+    const formatted = itemDetails.map((res, i) => {
+      const item = res.data;
+      const precoVenda = item.price;
+      const precoCusto = precoVenda * 0.6;
+      const margem = precoVenda - precoCusto;
+
+      let sku = "—";
+      if (item.variations && item.variations.length > 0) {
+        const firstVariation = item.variations[0];
+        if (firstVariation.seller_custom_field) {
+          sku = firstVariation.seller_custom_field;
+        }
+      }
+      if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
+        const skuAttribute = item.attributes.find(attr => 
+          attr.id === "SELLER_SKU" || 
+          attr.id === "SKU" || 
+          attr.name === "SKU" ||
+          attr.name === "Código de identificação" ||
+          attr.value_id === "SELLER_SKU"
+        );
+        if (skuAttribute) {
+          sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
+        }
+      }
+      if (sku === "—" && item.seller_custom_field) {
+        sku = item.seller_custom_field;
+      }
+      if (sku === "—") {
+        sku = item.id.substring(3, 11);
+      }
+
+      return {
+        id: item.id,
+        sku: sku,
+        image: item.thumbnail,
+        estoque: item.available_quantity,
+        title: item.title,
+        precoVenda,
+        precoCusto,
+        margemPercentual: Math.round((margem / precoCusto) * 100),
+        margemReais: margem.toFixed(2),
+        lucroTotal: (margem * item.sold_quantity).toFixed(2),
+        visitas: visitStats[i]?.data?.total_visits || 0,
+        vendas: item.sold_quantity,
+        promocao: item.official_store_id !== null,
+        permalink: item.permalink,
+        status: item.status,
+      };
+    });
+
+    res.json(formatted);
+  } catch (error) {
+    console.error(`[ML_ERROR] Error in /:accountId/items: ${error.message}`);
+    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
+  }
+});
+
+// Status de integração para conta específica
+router.get("/:accountId/status", async (req, res) => {
+  const userId = "default_user";
+  const { accountId } = req.params;
+
+  try {
+    const tokenData = await getAccountTokensFromDB(userId, "mercadolivre", accountId);
+    if (!tokenData) {
+      return res.json({ integrated: false, message: "Conta não integrada." });
+    }
+
+    // Tenta obter um token válido (isso vai tentar refrescar se necessário)
+    await getValidAccountAccessToken(userId, "mercadolivre", accountId);
+
+    res.json({ integrated: true, message: "Conta integrada e token válido." });
+  } catch (error) {
+    console.error(`[ML_ERROR] Error checking status for account ${accountId}: ${error.message}`);
+    res.status(500).json({ integrated: false, message: `Erro ao verificar status: ${error.message}` });
+  }
+});
+
+// Remover integração para conta específica
+router.delete("/:accountId/remove", async (req, res) => {
+  const userId = "default_user";
+  const { accountId } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query(
+      "DELETE FROM accounts WHERE user_id = $1 AND marketplace = $2 AND id = $3",
+      [userId, "mercadolivre", accountId]
+    );
+    res.json({ message: "Integração removida com sucesso." });
+  } catch (error) {
+    console.error(`[ML_ERROR] Error removing integration for account ${accountId}: ${error.message}`);
+    res.status(500).json({ message: "Erro ao remover integração.", error: error.message });
+  } finally {
+    client.release();
   }
 });
 
 module.exports = router;
+
+
