@@ -7,7 +7,7 @@ const CLIENT_ID = process.env.ML_CLIENT_ID || "911500565972996";
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "LcenM7oN47WLU69dLztOzWNILhOxNp5Z";
 const REDIRECT_URI = process.env.ML_REDIRECT_URI || "https://dsseller.com.br/auth/callback";
 
-// Recupera tokens do banco (compatibilidade)
+// Recupera tokens do banco (compatibilidade )
 const getTokensFromDB = async (userId, marketplace) => {
   const client = await pool.connect();
   try {
@@ -103,7 +103,7 @@ const saveAccountTokensToDB = async (userId, marketplace, accountId, accessToken
 
 router.get("/auth-url", (req, res) => {
   const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
-  res.json({ authUrl });
+  res.json({ authUrl } );
 });
 
 // Troca código por token (GET)
@@ -121,7 +121,7 @@ router.get("/exchange-code-get", async (req, res) => {
       client_secret: CLIENT_SECRET,
       code,
       redirect_uri: REDIRECT_URI,
-    });
+    } );
     const { access_token, refresh_token, expires_in } = response.data;
     
     // Salvar na tabela tokens (compatibilidade)
@@ -134,7 +134,7 @@ router.get("/exchange-code-get", async (req, res) => {
     try {
       const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
         headers: { Authorization: `Bearer ${access_token}` },
-      });
+      } );
       
       if (userResponse.data && userResponse.data.nickname) {
         accountName = `ML: ${userResponse.data.nickname}`;
@@ -171,13 +171,13 @@ router.post("/exchange-code", async (req, res) => {
   if (!code) return res.status(400).json({ message: "Authorization code is required" });
 
   try {
-    const response = await axios.post("https://api.mercadolivre.com/oauth/token", {
+    const response = await axios.post("https://api.mercadolibre.com/oauth/token", {
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
       code,
       redirect_uri: REDIRECT_URI,
-    });
+    } );
     const { access_token, refresh_token, expires_in } = response.data;
     
     // Salvar na tabela tokens (compatibilidade)
@@ -190,7 +190,7 @@ router.post("/exchange-code", async (req, res) => {
     try {
       const userResponse = await axios.get("https://api.mercadolibre.com/users/me", {
         headers: { Authorization: `Bearer ${access_token}` },
-      });
+      } );
       
       if (userResponse.data && userResponse.data.nickname) {
         accountName = `ML: ${userResponse.data.nickname}`;
@@ -230,7 +230,7 @@ const getValidAccessToken = async (userId, marketplace) => {
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
       refresh_token: tokenData.refresh_token,
-    });
+    } );
     const { access_token, refresh_token, expires_in } = response.data;
     await saveTokensToDB(userId, marketplace, access_token, refresh_token, expires_in);
     return access_token;
@@ -263,7 +263,7 @@ const getValidAccountAccessToken = async (userId, marketplace, accountId = null)
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
         refresh_token: tokenData.refresh_token,
-      });
+      } );
       const { access_token, refresh_token, expires_in } = response.data;
       
       console.log(`[ML_DEBUG] Token refreshed successfully. New expires_in: ${expires_in}s`);
@@ -306,7 +306,7 @@ router.get("/user-info", async (req, res) => {
     const accessToken = await getValidAccessToken(userId, marketplace);
     const response = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    } );
     res.json(response.data);
   } catch (error) {
     console.error(`[ML_ERROR] Error in /user-info (compatibility): ${error.message}`);
@@ -323,7 +323,7 @@ router.get("/:accountId/user-info", async (req, res) => {
     const accessToken = await getValidAccountAccessToken(userId, "mercadolivre", accountId);
     const response = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    } );
     res.json(response.data);
   } catch (error) {
     console.error(`[ML_ERROR] Error in /:accountId/user-info: ${error.message}`);
@@ -340,13 +340,13 @@ router.get("/items", async (req, res) => {
     const accessToken = await getValidAccessToken(userId, marketplace);
     const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    } );
 
     const sellerId = userInfo.data.id;
     const itemList = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       params: { limit: 50, offset: 0 },
-    });
+    } );
 
     const itemIds = itemList.data.results;
 
@@ -354,7 +354,7 @@ router.get("/items", async (req, res) => {
       itemIds.map(id =>
         axios.get(`https://api.mercadolibre.com/items/${id}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
-        })
+        } )
       )
     );
 
@@ -372,7 +372,7 @@ router.get("/items", async (req, res) => {
         axios
           .get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
             headers: { Authorization: `Bearer ${accessToken}` },
-          })
+          } )
           .catch(() => ({ data: { total_visits: 0 } }))
       )
     );
@@ -427,159 +427,5 @@ router.get("/items", async (req, res) => {
         precoVenda,
         precoCusto,
         margemPercentual: Math.round((margem / precoCusto) * 100),
-        margemReais: margem.toFixed(2),
-        lucroTotal: (margem * item.sold_quantity).toFixed(2),
-        visitas: visitStats[i]?.data?.total_visits || 0,
-        vendas: item.sold_quantity,
-        promocao: item.official_store_id !== null,
-        permalink: item.permalink,
-        status: item.status,
-      };
-    });
-
-    res.json(formatted);
-  } catch (error) {
-    console.error(`[ML_ERROR] Error in /items (compatibility): ${error.message}`);
-    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
-  }
-});
-
-// Lista de anúncios com estatísticas e SKU para conta específica
-router.get("/:accountId/items", async (req, res) => {
-  const userId = "default_user";
-  const { accountId } = req.params;
-
-  try {
-    const accessToken = await getValidAccountAccessToken(userId, "mercadolivre", accountId);
-    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    const sellerId = userInfo.data.id;
-    const itemList = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { limit: 50, offset: 0 },
-    });
-
-    const itemIds = itemList.data.results;
-
-    const itemDetails = await Promise.all(
-      itemIds.map(id =>
-        axios.get(`https://api.mercadolibre.com/items/${id}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
-      )
-    );
-
-    const visitStats = await Promise.all(
-      itemIds.map(id =>
-        axios
-          .get(`https://api.mercadolibre.com/items/${id}/visits/time_window?last=30&unit=day`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          })
-          .catch(() => ({ data: { total_visits: 0 } }))
-      )
-    );
-
-    const formatted = itemDetails.map((res, i) => {
-      const item = res.data;
-      const precoVenda = item.price;
-      const precoCusto = precoVenda * 0.6;
-      const margem = precoVenda - precoCusto;
-
-      let sku = "—";
-      if (item.variations && item.variations.length > 0) {
-        const firstVariation = item.variations[0];
-        if (firstVariation.seller_custom_field) {
-          sku = firstVariation.seller_custom_field;
-        }
-      }
-      if (sku === "—" && item.attributes && Array.isArray(item.attributes)) {
-        const skuAttribute = item.attributes.find(attr => 
-          attr.id === "SELLER_SKU" || 
-          attr.id === "SKU" || 
-          attr.name === "SKU" ||
-          attr.name === "Código de identificação" ||
-          attr.value_id === "SELLER_SKU"
-        );
-        if (skuAttribute) {
-          sku = skuAttribute.value_name || skuAttribute.value_id || skuAttribute.values?.[0]?.name;
-        }
-      }
-      if (sku === "—" && item.seller_custom_field) {
-        sku = item.seller_custom_field;
-      }
-      if (sku === "—") {
-        sku = item.id.substring(3, 11);
-      }
-
-      return {
-        id: item.id,
-        sku: sku,
-        image: item.thumbnail,
-        estoque: item.available_quantity,
-        title: item.title,
-        precoVenda,
-        precoCusto,
-        margemPercentual: Math.round((margem / precoCusto) * 100),
-        margemReais: margem.toFixed(2),
-        lucroTotal: (margem * item.sold_quantity).toFixed(2),
-        visitas: visitStats[i]?.data?.total_visits || 0,
-        vendas: item.sold_quantity,
-        promocao: item.official_store_id !== null,
-        permalink: item.permalink,
-        status: item.status,
-      };
-    });
-
-    res.json(formatted);
-  } catch (error) {
-    console.error(`[ML_ERROR] Error in /:accountId/items: ${error.message}`);
-    res.status(500).json({ message: "Erro ao buscar anúncios", error: error.message });
-  }
-});
-
-// Status de integração para conta específica
-router.get("/:accountId/status", async (req, res) => {
-  const userId = "default_user";
-  const { accountId } = req.params;
-
-  try {
-    const tokenData = await getAccountTokensFromDB(userId, "mercadolivre", accountId);
-    if (!tokenData) {
-      return res.json({ integrated: false, message: "Conta não integrada." });
-    }
-
-    // Tenta obter um token válido (isso vai tentar refrescar se necessário)
-    await getValidAccountAccessToken(userId, "mercadolivre", accountId);
-
-    res.json({ integrated: true, message: "Conta integrada e token válido." });
-  } catch (error) {
-    console.error(`[ML_ERROR] Error checking status for account ${accountId}: ${error.message}`);
-    res.status(500).json({ integrated: false, message: `Erro ao verificar status: ${error.message}` });
-  }
-});
-
-// Remover integração para conta específica
-router.delete("/:accountId/remove", async (req, res) => {
-  const userId = "default_user";
-  const { accountId } = req.params;
-  const client = await pool.connect();
-
-  try {
-    await client.query(
-      "DELETE FROM accounts WHERE user_id = $1 AND marketplace = $2 AND id = $3",
-      [userId, "mercadolivre", accountId]
-    );
-    res.json({ message: "Integração removida com sucesso." });
-  } catch (error) {
-    console.error(`[ML_ERROR] Error removing integration for account ${accountId}: ${error.message}`);
-    res.status(500).json({ message: "Erro ao remover integração.", error: error.message });
-  } finally {
-    client.release();
-  }
-});
-
-module.exports = router;
-
-
+       
+(Content truncated due to size limit. Use line ranges to read in chunks)
