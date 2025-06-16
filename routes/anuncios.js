@@ -56,13 +56,17 @@ router.get("/ml", async (req, res) => {
                 )?.value_name || "-"
               );
 
+          const visitas = itemData.initial_quantity && itemData.available_quantity
+            ? itemData.initial_quantity - itemData.available_quantity
+            : 0;
+
           return {
             id: itemData.id,
             title: itemData.title,
             image: itemData.thumbnail,
             sku: sku,
             estoque: itemData.available_quantity || 0,
-            visitas: 0,
+            visitas: visitas,
             vendas: itemData.sold_quantity || 0,
             price: itemData.price,
             permalink: itemData.permalink,
