@@ -10,6 +10,7 @@ router.get("/ml", async (req, res) => {
     client.release();
 
     if (result.rows.length === 0) {
+      console.error("[ANUNCIOS_LOG] Token não encontrado.");
       return res.status(404).json({ error: "Token não encontrado" });
     }
 
@@ -31,37 +32,47 @@ router.get("/ml", async (req, res) => {
     const itemIds = itemsResponse.data.results;
 
     if (itemIds.length === 0) {
+      console.log("[ANUNCIOS_LOG] Nenhum anúncio ativo encontrado.");
       return res.json({ anuncios: [] });
     }
 
     const itemsDetails = await Promise.all(
       itemIds.map(async (itemId) => {
-        const detailResponse = await axios.get(
-          `https://api.mercadolibre.com/items/${itemId}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        try {
+          const detailResponse = await axios.get(
+            `https://api.mercadolibre.com/items/${itemId}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
 
-        console.log("[ANUNCIO_RAW]", detailResponse.data); // <-- log inserido aqui
+          console.log("[ANUNCIO_RAW]", detailResponse.data);
 
-        return {
-          id: detailResponse.data.id,
-          title: detailResponse.data.title,
-          price: detailResponse.data.price,
-          thumbnail: detailResponse.data.thumbnail,
-          permalink: detailResponse.data.permalink,
-          status: detailResponse.data.status,
-          precoVenda: detailResponse.data.price,
-          precoCusto: 0,
-          totalCostML: 0,
-        };
+          return {
+            id: detailResponse.data.id,
+            title: detailResponse.data.title,
+            price: detailResponse.data.price,
+            thumbnail: detailResponse.data.thumbnail,
+            permalink: detailResponse.data.permalink,
+            status: detailResponse.data.status,
+            available_quantity: detailResponse.data.available_quantity || 0,
+            sold_quantity: detailResponse.data.sold_quantity || 0,
+            sku: detailResponse.data.seller_custom_field || "",
+            precoVenda: detailResponse.data.price,
+            precoCusto: 0,
+            totalCostML: 0,
+          };
+        } catch (itemErr) {
+          console.error(`[ANUNCIOS_LOG] Erro ao buscar detalhes do item ${itemId}:`, itemErr.message);
+          return null;
+        }
       })
     );
 
-    res.json({ anuncios: itemsDetails });
+    const validItems = itemsDetails.filter(item => item !== null);
+    res.json({ anuncios: validItems });
   } catch (error) {
-    console.error("[ANUNCIOS_LOG]", error.message);
+    console.error("[ANUNCIOS_LOG] Erro geral:", error.message);
     res.status(500).json({ error: "Erro ao buscar anúncios" });
   }
 });
