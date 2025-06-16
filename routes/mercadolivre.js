@@ -59,8 +59,8 @@ router.get("/exchange-code-get", async (req, res) => {
 
     await saveTokens(data.access_token, data.refresh_token, data.expires_in);
 
-    // Redireciona para o frontend após integração
-    res.redirect(`https://dsseller.com.br/auth/callback?code=${code}`);
+    // redireciona direto pra tela de anúncios com integração confirmada
+    res.redirect("https://dsseller.com.br/anuncios/ml?ml_integrado=1");
   } catch (err) {
     res.status(500).json({ message: "Error exchanging code", error: err.message });
   }
