@@ -43,20 +43,34 @@ router.get("/ml", async (_req, res) => {
       return res.json({ anuncios: [] });
     }
 
+    // Datas para os últimos 30 dias
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setDate(toDate.getDate() - 30);
+
+    const formatDate = (d) => d.toISOString().split("T")[0];
+    const date_from = formatDate(fromDate);
+    const date_to = formatDate(toDate);
+
+    const visitasResponse = await axios.get(
+      `https://api.mercadolibre.com/visits/items?ids=${itemIds.join(",")}&date_from=${date_from}&date_to=${date_to}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    const visitasMap = {};
+    visitasResponse.data.forEach(v => {
+      visitasMap[v.item_id] = v.total_visits;
+    });
+
     const itemsDetails = await Promise.all(
       itemIds.map(async (itemId) => {
         try {
-          const [itemRes, visitaRes] = await Promise.all([
-            axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+          const { data: itemData } = await axios.get(
+            `https://api.mercadolibre.com/items/${itemId}`,
+            {
               headers: { Authorization: `Bearer ${token}` },
-            }),
-            axios.get(`https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=30`, {
-              headers: { Authorization: `Bearer ${token}` },
-            }),
-          ]);
-
-          const itemData = itemRes.data;
-          const visitas30dias = visitaRes.data.total || 0;
+            }
+          );
 
           const sku = itemData.seller_custom_field && itemData.seller_custom_field.trim()
             ? itemData.seller_custom_field
@@ -74,7 +88,7 @@ router.get("/ml", async (_req, res) => {
             image: itemData.thumbnail,
             sku: sku,
             estoque: itemData.available_quantity || 0,
-            visitas: visitas30dias,
+            visitas: visitasMap[itemId] ?? "-",
             vendas: itemData.sold_quantity || 0,
             price: itemData.price,
             permalink: itemData.permalink,
