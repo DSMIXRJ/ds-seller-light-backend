@@ -39,31 +39,37 @@ router.get("/ml", async (req, res) => {
     const itemsDetails = await Promise.all(
       itemIds.map(async (itemId) => {
         try {
-          const detailResponse = await axios.get(
-            `https://api.mercadolibre.com/items/${itemId}`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
+          const { data } = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
 
-          console.log("[ANUNCIO_RAW]", detailResponse.data);
+          console.log("[ANUNCIO_RESUMO]", {
+            id: data.id,
+            title: data.title,
+            sku: data.seller_custom_field,
+            estoque: data.available_quantity,
+            visitas: data.initial_quantity - data.available_quantity,
+            vendas: data.sold_quantity,
+            thumbnail: data.thumbnail,
+          });
 
           return {
-            id: detailResponse.data.id,
-            title: detailResponse.data.title,
-            price: detailResponse.data.price,
-            thumbnail: detailResponse.data.thumbnail,
-            permalink: detailResponse.data.permalink,
-            status: detailResponse.data.status,
-            available_quantity: detailResponse.data.available_quantity || 0,
-            sold_quantity: detailResponse.data.sold_quantity || 0,
-            sku: detailResponse.data.seller_custom_field || "",
-            precoVenda: detailResponse.data.price,
+            id: data.id,
+            title: data.title,
+            price: data.price,
+            thumbnail: data.thumbnail,
+            permalink: data.permalink,
+            status: data.status,
+            sku: data.seller_custom_field || "",
+            available_quantity: data.available_quantity || 0,
+            sold_quantity: data.sold_quantity || 0,
+            visitas: (data.initial_quantity || 0) - (data.available_quantity || 0),
+            precoVenda: data.price,
             precoCusto: 0,
             totalCostML: 0,
           };
-        } catch (itemErr) {
-          console.error(`[ANUNCIOS_LOG] Erro ao buscar detalhes do item ${itemId}:`, itemErr.message);
+        } catch (err) {
+          console.error(`[ANUNCIOS_LOG] Falha ao carregar item ${itemId}:`, err.message);
           return null;
         }
       })
@@ -78,3 +84,4 @@ router.get("/ml", async (req, res) => {
 });
 
 module.exports = router;
+
