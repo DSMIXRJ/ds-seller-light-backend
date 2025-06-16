@@ -6,7 +6,7 @@ const axios = require("axios");
 router.get("/ml", async (req, res) => {
   try {
     const client = await pool.connect();
-    const result = await client.query("SELECT * FROM tokens WHERE origem = 'ml' ORDER BY id DESC LIMIT 1");
+    const result = await client.query("SELECT * FROM tokens WHERE marketplace = 'mercadolivre' ORDER BY obtained_at DESC LIMIT 1");
     client.release();
 
     if (result.rows.length === 0) {
@@ -15,20 +15,49 @@ router.get("/ml", async (req, res) => {
 
     const token = result.rows[0].access_token;
 
-    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
+    const userInfo = await axios.get("https://mercadolivre.com.br/users/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
 
     const userId = userInfo.data.id;
 
-    const response = await axios.get(
+    const itemsResponse = await axios.get(
       `https://api.mercadolibre.com/users/${userId}/items/search?status=active`,
       {
         headers: { Authorization: `Bearer ${token}` },
       }
     );
 
-    res.json({ anuncios: response.data.results });
+    const itemIds = itemsResponse.data.results;
+
+    if (itemIds.length === 0) {
+      return res.json({ anuncios: [] });
+    }
+
+    const itemsDetails = await Promise.all(
+      itemIds.map(async (itemId) => {
+        const detailResponse = await axios.get(
+          `https://api.mercadolibre.com/items/${itemId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        return {
+          id: detailResponse.data.id,
+          title: detailResponse.data.title,
+          price: detailResponse.data.price,
+          thumbnail: detailResponse.data.thumbnail,
+          permalink: detailResponse.data.permalink,
+          status: detailResponse.data.status,
+          // Adicione outros campos relevantes aqui
+          precoVenda: detailResponse.data.price, // Exemplo de mapeamento
+          precoCusto: 0, // Valor inicial, pode ser atualizado posteriormente
+          totalCostML: 0, // Valor inicial, pode ser atualizado posteriormente
+        };
+      })
+    );
+
+    res.json({ anuncios: itemsDetails });
   } catch (error) {
     console.error("[ANUNCIOS_LOG]", error.message);
     res.status(500).json({ error: "Erro ao buscar anúncios" });
@@ -36,3 +65,5 @@ router.get("/ml", async (req, res) => {
 });
 
 module.exports = router;
+
+
