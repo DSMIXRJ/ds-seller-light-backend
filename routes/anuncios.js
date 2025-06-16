@@ -15,7 +15,6 @@ router.get("/ml", async (req, res) => {
 
     const token = result.rows[0].access_token;
 
-    // Corrigido aqui ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
     const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -43,6 +42,9 @@ router.get("/ml", async (req, res) => {
             headers: { Authorization: `Bearer ${token}` },
           }
         );
+
+        console.log("[ANUNCIO_RAW]", detailResponse.data); // <-- log inserido aqui
+
         return {
           id: detailResponse.data.id,
           title: detailResponse.data.title,
