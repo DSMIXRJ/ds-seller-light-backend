@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require("../database");
 const axios = require("axios");
 
-router.get("/ml", async (req, res) => {
+router.get("/ml", async (_req, res) => {
   try {
     const client = await pool.connect();
     const result = await client.query(
@@ -22,15 +22,23 @@ router.get("/ml", async (req, res) => {
     });
 
     const userId = userInfo.data.id;
+    const limit = 50;
+    let offset = 0;
+    let itemIds = [];
 
-    const itemsResponse = await axios.get(
-      `https://api.mercadolibre.com/users/${userId}/items/search?status=active`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    // Paginação total
+    while (true) {
+      const response = await axios.get(
+        `https://api.mercadolibre.com/users/${userId}/items/search?status=active&offset=${offset}&limit=${limit}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
-    const itemIds = itemsResponse.data.results;
+      const pageItems = response.data.results;
+      if (pageItems.length === 0) break;
+
+      itemIds.push(...pageItems);
+      offset += limit;
+    }
 
     if (itemIds.length === 0) {
       return res.json({ anuncios: [] });
@@ -49,12 +57,12 @@ router.get("/ml", async (req, res) => {
           const sku = itemData.seller_custom_field && itemData.seller_custom_field.trim()
             ? itemData.seller_custom_field
             : (
-                itemData.attributes.find(a =>
-                  a.id === "SELLER_SKU" ||
-                  a.id === "SKU" ||
-                  a.id === "SELLER_CUSTOM_FIELD"
-                )?.value_name || "-"
-              );
+              itemData.attributes.find(a =>
+                a.id === "SELLER_SKU" ||
+                a.id === "SKU" ||
+                a.id === "SELLER_CUSTOM_FIELD"
+              )?.value_name || "-"
+            );
 
           const visitas = itemData.initial_quantity && itemData.available_quantity
             ? itemData.initial_quantity - itemData.available_quantity
