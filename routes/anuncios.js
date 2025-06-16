@@ -46,11 +46,11 @@ router.get("/ml", async (req, res) => {
           return {
             id: data.id,
             title: data.title,
-            image: data.thumbnail, // para coluna IMAGEM
-            sku: data.seller_custom_field || "", // para coluna SKU
-            estoque: data.available_quantity || 0, // para coluna ESTOQUE
-            visitas: (data.initial_quantity || 0) - (data.available_quantity || 0), // para coluna VISITAS
-            vendas: data.sold_quantity || 0, // para coluna VENDAS
+            image: data.thumbnail,
+            sku: data.seller_custom_field || "-",
+            estoque: data.available_quantity || 0,
+            visitas: 0,
+            vendas: data.sold_quantity || 0,
             price: data.price,
             permalink: data.permalink,
             status: data.status,
@@ -74,3 +74,4 @@ router.get("/ml", async (req, res) => {
 });
 
 module.exports = router;
+
