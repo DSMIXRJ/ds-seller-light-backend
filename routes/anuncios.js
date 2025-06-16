@@ -43,33 +43,23 @@ router.get("/ml", async (req, res) => {
             headers: { Authorization: `Bearer ${token}` },
           });
 
-          console.log("[ANUNCIO_RESUMO]", {
-            id: data.id,
-            title: data.title,
-            sku: data.seller_custom_field,
-            estoque: data.available_quantity,
-            visitas: data.initial_quantity - data.available_quantity,
-            vendas: data.sold_quantity,
-            thumbnail: data.thumbnail,
-          });
-
           return {
             id: data.id,
             title: data.title,
+            image: data.thumbnail, // para coluna IMAGEM
+            sku: data.seller_custom_field || "", // para coluna SKU
+            estoque: data.available_quantity || 0, // para coluna ESTOQUE
+            visitas: (data.initial_quantity || 0) - (data.available_quantity || 0), // para coluna VISITAS
+            vendas: data.sold_quantity || 0, // para coluna VENDAS
             price: data.price,
-            thumbnail: data.thumbnail,
             permalink: data.permalink,
             status: data.status,
-            sku: data.seller_custom_field || "",
-            available_quantity: data.available_quantity || 0,
-            sold_quantity: data.sold_quantity || 0,
-            visitas: (data.initial_quantity || 0) - (data.available_quantity || 0),
             precoVenda: data.price,
             precoCusto: 0,
             totalCostML: 0,
           };
         } catch (err) {
-          console.error(`[ANUNCIOS_LOG] Falha ao carregar item ${itemId}:`, err.message);
+          console.error(`[ANUNCIOS_LOG] Erro no item ${itemId}:`, err.message);
           return null;
         }
       })
@@ -84,4 +74,3 @@ router.get("/ml", async (req, res) => {
 });
 
 module.exports = router;
-
