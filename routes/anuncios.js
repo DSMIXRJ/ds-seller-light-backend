@@ -16,52 +16,97 @@ router.get("/ml", async (_req, res) => {
     }
 
     const token = result.rows[0].access_token;
-    const anuncioId = "MLB5292144812"; // ID fixo para teste
 
-    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${anuncioId}`, {
+    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const visitasRes = await axios.get(
-      `https://api.mercadolibre.com/visits/items?ids=${anuncioId}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    const userId = userInfo.data.id;
+    const limit = 50;
+    let offset = 0;
+    let itemIds = [];
 
-    const itemData = itemRes.data;
-    const visitas = visitasRes.data[anuncioId] ?? "-";
-
-    const sku = itemData.seller_custom_field && itemData.seller_custom_field.trim()
-      ? itemData.seller_custom_field
-      : (
-        itemData.attributes.find(a =>
-          a.id === "SELLER_SKU" ||
-          a.id === "SKU" ||
-          a.id === "SELLER_CUSTOM_FIELD"
-        )?.value_name || "-"
+    while (true) {
+      const response = await axios.get(
+        `https://api.mercadolibre.com/users/${userId}/items/search?status=active&offset=${offset}&limit=${limit}`,
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
-    const anuncioFormatado = {
-      id: itemData.id,
-      title: itemData.title,
-      image: itemData.thumbnail,
-      sku: sku,
-      estoque: itemData.available_quantity || 0,
-      visitas: visitas,
-      vendas: itemData.sold_quantity || 0,
-      price: itemData.price,
-      permalink: itemData.permalink,
-      status: itemData.status,
-      precoVenda: itemData.price,
-      precoCusto: 0,
-      totalCostML: 0,
-    };
+      const pageItems = response.data.results;
+      if (pageItems.length === 0) break;
 
-    res.json({ anuncios: [anuncioFormatado] });
+      itemIds.push(...pageItems);
+      offset += limit;
+    }
+
+    if (itemIds.length === 0) {
+      return res.json({ anuncios: [] });
+    }
+
+    const visitasMap = {};
+
+    for (let i = 0; i < itemIds.length; i += 50) {
+      const bloco = itemIds.slice(i, i + 50);
+      try {
+        const visitasRes = await axios.get(
+          `https://api.mercadolibre.com/visits/items?ids=${bloco.join(",")}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        Object.entries(visitasRes.data).forEach(([itemId, total]) => {
+          visitasMap[itemId] = total;
+        });
+      } catch (err) {
+        console.warn(`[VISITAS_LOG] Falha ao buscar visitas no bloco ${i}-${i+49}`);
+      }
+    }
+
+    const itemsDetails = await Promise.all(
+      itemIds.map(async (itemId) => {
+        try {
+          const { data: itemData } = await axios.get(
+            `https://api.mercadolibre.com/items/${itemId}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+
+          const sku = itemData.seller_custom_field && itemData.seller_custom_field.trim()
+            ? itemData.seller_custom_field
+            : (
+              itemData.attributes.find(a =>
+                a.id === "SELLER_SKU" ||
+                a.id === "SKU" ||
+                a.id === "SELLER_CUSTOM_FIELD"
+              )?.value_name || "-"
+            );
+
+          return {
+            id: itemData.id,
+            title: itemData.title,
+            image: itemData.thumbnail,
+            sku: sku,
+            estoque: itemData.available_quantity || 0,
+            visitas: visitasMap[itemId] ?? "-",
+            vendas: itemData.sold_quantity || 0,
+            price: itemData.price,
+            permalink: itemData.permalink,
+            status: itemData.status,
+            precoVenda: itemData.price,
+            precoCusto: 0,
+            totalCostML: 0,
+          };
+        } catch (err) {
+          console.error(`[ANUNCIOS_LOG] Erro no item ${itemId}:`, err.message);
+          return null;
+        }
+      })
+    );
+
+    const validItems = itemsDetails.filter(item => item !== null);
+    res.json({ anuncios: validItems });
   } catch (error) {
-    console.error("[ANUNCIOS_LOG] Erro ao buscar anúncio:", error.message);
-    res.status(500).json({ error: "Erro ao buscar anúncio" });
+    console.error("[ANUNCIOS_LOG] Erro ao buscar anúncios:", error.message);
+    res.status(500).json({ error: "Erro ao buscar anúncios" });
   }
 });
 
