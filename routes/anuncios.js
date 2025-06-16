@@ -26,7 +26,6 @@ router.get("/ml", async (_req, res) => {
     let offset = 0;
     let itemIds = [];
 
-    // Paginação total
     while (true) {
       const response = await axios.get(
         `https://api.mercadolibre.com/users/${userId}/items/search?status=active&offset=${offset}&limit=${limit}`,
@@ -47,12 +46,17 @@ router.get("/ml", async (_req, res) => {
     const itemsDetails = await Promise.all(
       itemIds.map(async (itemId) => {
         try {
-          const { data: itemData } = await axios.get(
-            `https://api.mercadolibre.com/items/${itemId}`,
-            {
+          const [itemRes, visitaRes] = await Promise.all([
+            axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
               headers: { Authorization: `Bearer ${token}` },
-            }
-          );
+            }),
+            axios.get(`https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=30`, {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+          ]);
+
+          const itemData = itemRes.data;
+          const visitas30dias = visitaRes.data.total || 0;
 
           const sku = itemData.seller_custom_field && itemData.seller_custom_field.trim()
             ? itemData.seller_custom_field
@@ -64,17 +68,13 @@ router.get("/ml", async (_req, res) => {
               )?.value_name || "-"
             );
 
-          const visitas = itemData.initial_quantity && itemData.available_quantity
-            ? itemData.initial_quantity - itemData.available_quantity
-            : 0;
-
           return {
             id: itemData.id,
             title: itemData.title,
             image: itemData.thumbnail,
             sku: sku,
             estoque: itemData.available_quantity || 0,
-            visitas: visitas,
+            visitas: visitas30dias,
             vendas: itemData.sold_quantity || 0,
             price: itemData.price,
             permalink: itemData.permalink,
