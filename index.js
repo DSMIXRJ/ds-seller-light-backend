@@ -11,6 +11,7 @@ const loginRoutes = require("./routes/login");
 const mercadoLivreRoutes = require("./routes/mercadolivre");
 const accountsRoutes = require("./routes/accounts");
 const configRoutes = require("./routes/config");
+const anunciosRoutes = require("./routes/anuncios"); // ⬅️ Adicionado
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -32,6 +33,7 @@ app.use("/api/login", loginRoutes);
 app.use("/api/mercadolivre", mercadoLivreRoutes);
 app.use("/api/accounts", accountsRoutes);
 app.use("/api/mercadolivre", configRoutes);
+app.use("/api/anuncios", anunciosRoutes); // ⬅️ Adicionado
 
 // 🔁 Redireciona /auth/callback para /api/mercadolivre/exchange-code-get
 app.get("/auth/callback", (req, res) => {
@@ -57,4 +59,3 @@ app.listen(port, () => {
   console.log("[INDEX_LOG] PostgreSQL connection attempt is handled by database.js on load.");
   console.log("[INDEX_LOG] Check earlier logs for [DB_LOG] messages from database.js.");
 });
-
