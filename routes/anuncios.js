@@ -15,7 +15,8 @@ router.get("/ml", async (req, res) => {
 
     const token = result.rows[0].access_token;
 
-    const userInfo = await axios.get("https://mercadolivre.com.br/users/me", {
+    // Corrigido aqui ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+    const userInfo = await axios.get("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -49,10 +50,9 @@ router.get("/ml", async (req, res) => {
           thumbnail: detailResponse.data.thumbnail,
           permalink: detailResponse.data.permalink,
           status: detailResponse.data.status,
-          // Adicione outros campos relevantes aqui
-          precoVenda: detailResponse.data.price, // Exemplo de mapeamento
-          precoCusto: 0, // Valor inicial, pode ser atualizado posteriormente
-          totalCostML: 0, // Valor inicial, pode ser atualizado posteriormente
+          precoVenda: detailResponse.data.price,
+          precoCusto: 0,
+          totalCostML: 0,
         };
       })
     );
@@ -65,5 +65,3 @@ router.get("/ml", async (req, res) => {
 });
 
 module.exports = router;
-
-
