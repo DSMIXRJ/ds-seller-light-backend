@@ -11,7 +11,8 @@ const loginRoutes = require("./routes/login");
 const mercadoLivreRoutes = require("./routes/mercadolivre");
 const accountsRoutes = require("./routes/accounts");
 const configRoutes = require("./routes/config");
-const anunciosRoutes = require("./routes/anuncios"); // ⬅️ Adicionado
+const anunciosRoutes = require("./routes/anuncios");
+const importarCustoRoutes = require("./routes/importarCusto"); // ✅ Adicionado
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -33,7 +34,8 @@ app.use("/api/login", loginRoutes);
 app.use("/api/mercadolivre", mercadoLivreRoutes);
 app.use("/api/accounts", accountsRoutes);
 app.use("/api/mercadolivre", configRoutes);
-app.use("/api/anuncios", anunciosRoutes); // ⬅️ Adicionado
+app.use("/api/anuncios", anunciosRoutes);
+app.use("/api/importar-custo", importarCustoRoutes); // ✅ Adicionado
 
 // 🔁 Redireciona /auth/callback para /api/mercadolivre/exchange-code-get
 app.get("/auth/callback", (req, res) => {
