@@ -49,12 +49,11 @@ router.get("/ml", async (_req, res) => {
       const bloco = itemIds.slice(i, i + 50);
       try {
         const visitasRes = await axios.get(
-          `https://api.mercadolibre.com/visits/items?ids=${bloco.join(",")}`,
+          `https://api.mercadolibre.com/items/visits?ids=${bloco.join(",")}&last=30&unit=day`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        console.log("[VISITAS_DATA]", visitasRes.data);
-        Object.entries(visitasRes.data).forEach(([itemId, data]) => {
-          visitasMap[itemId] = data.total_visits ?? "-";
+        visitasRes.data.forEach(entry => {
+          visitasMap[entry.item_id] = entry.total_visits ?? "-";
         });
       } catch (err) {
         console.warn(`[VISITAS_LOG] Falha ao buscar visitas no bloco ${i}-${i + 49}`);
@@ -112,3 +111,4 @@ router.get("/ml", async (_req, res) => {
 });
 
 module.exports = router;
+
