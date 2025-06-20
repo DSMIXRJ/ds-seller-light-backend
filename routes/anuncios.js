@@ -53,7 +53,7 @@ router.get("/ml", async (_req, res) => {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         visitasRes.data.forEach(entry => {
-          visitasMap[entry.item_id] = entry.total_visits ?? "-";
+          visitasMap[entry.item_id] = typeof entry.total_visits === "number" ? entry.total_visits : 0;
         });
       } catch (err) {
         console.warn(`[VISITAS_LOG] Falha ao buscar visitas no bloco ${i}-${i + 49}`);
@@ -86,7 +86,7 @@ router.get("/ml", async (_req, res) => {
             image: itemData.thumbnail,
             sku: sku,
             estoque: itemData.available_quantity || 0,
-            visitas: visitasMap[itemId] ?? "-",
+            visitas: visitasMap[itemId] ?? 0,
             vendas: itemData.sold_quantity || 0,
             price: itemData.price,
             permalink: itemData.permalink,
@@ -111,4 +111,3 @@ router.get("/ml", async (_req, res) => {
 });
 
 module.exports = router;
-
