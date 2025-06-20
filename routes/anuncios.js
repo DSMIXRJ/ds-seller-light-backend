@@ -52,11 +52,11 @@ router.get("/ml", async (_req, res) => {
           `https://api.mercadolibre.com/visits/items?ids=${bloco.join(",")}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        Object.entries(visitasRes.data).forEach(([itemId, total]) => {
-          visitasMap[itemId] = total;
+        Object.entries(visitasRes.data).forEach(([itemId, data]) => {
+          visitasMap[itemId] = data.total_visits ?? "-";
         });
       } catch (err) {
-        console.warn(`[VISITAS_LOG] Falha ao buscar visitas no bloco ${i}-${i+49}`);
+        console.warn(`[VISITAS_LOG] Falha ao buscar visitas no bloco ${i}-${i + 49}`);
       }
     }
 
