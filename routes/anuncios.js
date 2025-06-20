@@ -52,6 +52,7 @@ router.get("/ml", async (_req, res) => {
           `https://api.mercadolibre.com/visits/items?ids=${bloco.join(",")}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        console.log("[VISITAS_DATA]", visitasRes.data);
         Object.entries(visitasRes.data).forEach(([itemId, data]) => {
           visitasMap[itemId] = data.total_visits ?? "-";
         });
