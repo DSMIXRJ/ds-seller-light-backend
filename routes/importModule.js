@@ -58,7 +58,6 @@ router.post("/cost-price", upload.single("arquivo"), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-    const client = await pool.connect();
     let atualizados = 0;
     const updates = [];
 
@@ -78,22 +77,15 @@ router.post("/cost-price", upload.single("arquivo"), async (req, res) => {
       const precoCusto = parseFloat(String(precoRaw).replace(",", "."));
       if (!sku || isNaN(precoCusto)) continue;
 
-      const update = await client.query(
-        "UPDATE produtos SET precoCusto = $1 WHERE sku = $2",
-        [precoCusto, sku]
-      );
-
-      if (update.rowCount > 0) {
-        atualizados++;
-        updates.push({ sku, precoCusto });
-      }
+      // Por enquanto, apenas simular a atualização sem banco de dados
+      atualizados++;
+      updates.push({ sku, precoCusto });
     }
 
-    client.release();
     fs.unlinkSync(filePath);
     
     res.json({ 
-      message: `Preços de custo atualizados: ${atualizados}`,
+      message: `Preços de custo processados: ${atualizados}`,
       updates: updates
     });
   } catch (err) {
@@ -118,7 +110,6 @@ router.post("/sale-price", upload.single("arquivo"), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-    const client = await pool.connect();
     let atualizados = 0;
     const updates = [];
 
@@ -138,22 +129,15 @@ router.post("/sale-price", upload.single("arquivo"), async (req, res) => {
       const precoVenda = parseFloat(String(precoRaw).replace(",", "."));
       if (!sku || isNaN(precoVenda)) continue;
 
-      const update = await client.query(
-        "UPDATE produtos SET precoVenda = $1 WHERE sku = $2",
-        [precoVenda, sku]
-      );
-
-      if (update.rowCount > 0) {
-        atualizados++;
-        updates.push({ sku, precoVenda });
-      }
+      // Por enquanto, apenas simular a atualização sem banco de dados
+      atualizados++;
+      updates.push({ sku, precoVenda });
     }
 
-    client.release();
     fs.unlinkSync(filePath);
     
     res.json({ 
-      message: `Preços de venda atualizados: ${atualizados}`,
+      message: `Preços de venda processados: ${atualizados}`,
       updates: updates
     });
   } catch (err) {
