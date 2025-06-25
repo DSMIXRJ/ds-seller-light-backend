@@ -13,7 +13,6 @@ const accountsRoutes = require("./routes/accounts");
 const configRoutes = require("./routes/config");
 const anunciosRoutes = require("./routes/anuncios");
 const importarCustoRoutes = require("./routes/importarCusto"); // ✅ Adicionado
-const importModuleRoutes = require("./routes/importModule"); // ✅ Novo módulo de importação
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -37,7 +36,6 @@ app.use("/api/accounts", accountsRoutes);
 app.use("/api/mercadolivre", configRoutes);
 app.use("/api/anuncios", anunciosRoutes);
 app.use("/api/importar-custo", importarCustoRoutes); // ✅ Adicionado
-app.use("/api/import", importModuleRoutes); // ✅ Novo módulo de importação
 
 // 🔁 Redireciona /auth/callback para /api/mercadolivre/exchange-code-get
 app.get("/auth/callback", (req, res) => {
